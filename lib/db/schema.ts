@@ -286,4 +286,20 @@ CREATE TABLE IF NOT EXISTS prompt_supplements (
   created_at TEXT DEFAULT (datetime('now','localtime')),
   UNIQUE(project_id, stage)
 );
+
+CREATE TABLE IF NOT EXISTS prompt_supplement_rules (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  stage TEXT NOT NULL DEFAULT 'ai1',
+  rule_text TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'optimizer',
+  status TEXT NOT NULL DEFAULT 'candidate',
+  score_before REAL,
+  score_after REAL,
+  effectiveness REAL,
+  apply_count INTEGER DEFAULT 0,
+  success_count INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now','localtime')),
+  updated_at TEXT DEFAULT (datetime('now','localtime'))
+);
 `;

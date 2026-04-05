@@ -93,6 +93,24 @@
 
 ---
 
+## 채점 보정 예시 (Calibration)
+
+### 예시 A: overallScore 2.5 판정
+- originality 2: "특별한 학교에서 괴물이 나타남" → 10개 이상의 기존 작품과 동일
+- character_distinction 3: 5명의 메인이 있지만 "리더/참모/전투형/힐러/신비" 범용 역할
+- worldbuilding_hook 2: "학교 지하에 봉인된 문이 있다" → 게이트 구조, 고유성 없음
+- conflict_engine 3: "괴물 vs 학생" 외부 갈등만. 내부 갈등 약함
+→ 이 수준은 AI 2로 넘기면 대본이 generic해짐. revise 필수.
+
+### 예시 B: overallScore 4.3 판정
+- originality 4: "잊혀진 감정이 시간으로 응축되는 시계탑" → 고유 장치, 기존 작품과 차별화
+- character_distinction 5: 각 캐릭터의 서사 기능/약점/시즌 역할이 모두 다름
+- worldbuilding_hook 4: 추상+물리 연결 있지만 "왜 이 학교인가"의 답이 약간 약함
+- conflict_engine 4: 내부(판단 갈등) + 외부(시간 붕괴) 둘 다 기능하지만 중반 확장이 더 필요
+→ 세부 보완 후 AI 2로 넘기기 적합. approve 가능.
+
+---
+
 ## 출력 형식
 
 반드시 유효한 JSON만 출력. 다른 텍스트 없이.

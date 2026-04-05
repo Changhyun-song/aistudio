@@ -44,6 +44,7 @@ export const projectRepo = {
     return this.get(id)!;
   },
   delete(id: string): void {
+    getDb().prepare('DELETE FROM prompt_supplements WHERE project_id = ?').run(id);
     getDb().prepare('DELETE FROM projects WHERE id = ?').run(id);
   },
 };
@@ -672,5 +673,11 @@ export const promptSupplementRepo = {
   },
   upsertGlobal(stage: string, supplementText: string, diagnosisJson: string): PromptSupplement {
     return this.upsert(GLOBAL_PROJECT_ID, stage, supplementText, diagnosisJson);
+  },
+  deleteByProject(projectId: string): void {
+    getDb().prepare('DELETE FROM prompt_supplements WHERE project_id = ?').run(projectId);
+  },
+  resetGlobal(): void {
+    getDb().prepare('DELETE FROM prompt_supplements WHERE project_id = ?').run(GLOBAL_PROJECT_ID);
   },
 };

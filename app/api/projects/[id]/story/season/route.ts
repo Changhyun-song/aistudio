@@ -10,7 +10,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   return NextResponse.json(arcs);
 }
 
-export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const project = projectRepo.get(id);
   if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 });
@@ -20,6 +20,8 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   if (!bible) return NextResponse.json({ error: 'Generate Series Bible first' }, { status: 400 });
 
   const concept = storyConceptRepo.getByProject(id);
+  const body = await req.json().catch(() => ({}));
+  const revisionFeedback: string | undefined = body.revisionFeedback;
 
   let genreOverlay: GenreOverlay | undefined;
   try {
@@ -28,7 +30,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   } catch { /* empty */ }
 
   try {
-    const arcs = await generateSeasonPlan(bible, concept?.approved_markdown, genreOverlay, id);
+    const arcs = await generateSeasonPlan(bible, concept?.approved_markdown, genreOverlay, id, revisionFeedback);
 
     storyEpisodeArcRepo.replaceBatch(
       id,

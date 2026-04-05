@@ -17,6 +17,16 @@ function getSupplementForStage(projectId: string, stage: string): string {
   } catch { return ''; }
 }
 
+function isContentAgnostic(text: string): boolean {
+  // Korean name + particle patterns (인명+조사)
+  const koreanNamePattern = /[가-힣]{2,4}(?:는|은|이|가|를|을|의|에게|한테|와|과)\s/g;
+  const matches = text.match(koreanNamePattern) || [];
+  if (matches.length >= 3) return false;
+  // Direct character-function mapping pattern
+  if (/[가-힣]{2,4}=[가-힣]/g.test(text)) return false;
+  return true;
+}
+
 const MODEL_GENERATOR = process.env.OPENAI_MODEL_GENERATOR || process.env.OPENAI_MODEL || 'gpt-5.4-mini';
 const MODEL_EVALUATOR = process.env.OPENAI_MODEL_EVALUATOR || process.env.OPENAI_MODEL || 'gpt-5.4-mini';
 const MODEL_PLANNER   = process.env.OPENAI_MODEL_PLANNER   || process.env.OPENAI_MODEL || 'gpt-5.4-mini';
@@ -551,6 +561,7 @@ export async function generateSeasonPlan(
   concept?: string,
   genreOverlay?: GenreOverlay,
   projectId?: string,
+  revisionFeedback?: string,
 ): Promise<EpisodeArcOutput[]> {
   let bibleJson: Record<string, unknown>;
   try { bibleJson = JSON.parse(bible.raw_json); } catch { bibleJson = {}; }
@@ -608,6 +619,7 @@ ${concept ? `## AI 1 승인된 스토리 컨셉 (전문)\n${concept}\n` : ''}
 ]
 \`\`\`
 
+${revisionFeedback ? `\n## ★ 이전 평가 피드백 (반드시 반영할 것)\n${revisionFeedback}\n` : ''}
 ${epCount}개의 에피소드를 출력. 한국어로 작성.`;
 
   const provider = getProvider();
@@ -664,6 +676,7 @@ export async function generateEpisodeScript(
   concept?: string,
   genreOverlay?: GenreOverlay,
   projectId?: string,
+  revisionFeedback?: string,
 ): Promise<EpisodeScriptOutput> {
   let bibleJson: Record<string, unknown>;
   try { bibleJson = JSON.parse(bible.raw_json); } catch { bibleJson = {}; }
@@ -721,6 +734,7 @@ ${charBlock}
 - 각 장면: 장소, 시간, 행동 서술, **실제 대사** (따옴표), 감정 지시, 카메라 힌트 포함
 - AI 3가 읽고 바로 shot 단위로 분해할 수 있는 수준
 
+${revisionFeedback ? `## ★ 이전 평가 피드백 (반드시 반영할 것)\n${revisionFeedback}\n` : ''}
 아래 JSON 형식으로만 출력:
 \`\`\`json
 {
@@ -1004,10 +1018,13 @@ export async function generateFrameAndVideoPackets(
   genreOverlay?: GenreOverlay,
   videoProvider: VideoProvider = 'higgsfield',
   projectId?: string,
+  revisionFeedback?: string,
 ): Promise<FrameVideoOutputV2> {
-  const userMsg = videoProvider === 'seedance_2_0'
+  const feedbackBlock = revisionFeedback ? `\n\n## ★ 이전 평가 피드백 (반드시 반영할 것)\n${revisionFeedback}` : '';
+  const baseMsg = videoProvider === 'seedance_2_0'
     ? buildSeedanceUserMsg(bible, arc, script, characters, density, genreOverlay)
     : buildHiggsfieldUserMsg(bible, arc, script, characters, density, genreOverlay);
+  const userMsg = baseMsg + feedbackBlock;
 
   const provider = getProvider();
   const supplement = projectId ? getSupplementForStage(projectId, 'ai3') : '';
@@ -1068,6 +1085,32 @@ export interface EvalResult {
   finalVerdict: 'approve' | 'revise';
 }
 
+function sampleContentForEvaluation(content: string, maxLen: number = 20000): string {
+  if (content.length <= maxLen) return content;
+  const front = Math.floor(maxLen * 0.4);
+  const mid = Math.floor(maxLen * 0.2);
+  const back = Math.floor(maxLen * 0.4);
+  const midStart = Math.floor((content.length - mid) / 2);
+  return [
+    content.slice(0, front),
+    '\n\n[... 중간 구간 ...]\n\n',
+    content.slice(midStart, midStart + mid),
+    '\n\n[... 후반 구간 ...]\n\n',
+    content.slice(-back),
+  ].join('');
+}
+
+function computeWeightedScore(criteria: EvalCriterion[]): number {
+  if (!criteria?.length) return 0;
+  let totalWeighted = 0;
+  let totalWeight = 0;
+  for (const c of criteria) {
+    totalWeighted += c.score * (c.weight || 1);
+    totalWeight += (c.weight || 1);
+  }
+  return totalWeight > 0 ? Math.round((totalWeighted / totalWeight) * 100) / 100 : 0;
+}
+
 function normalizeScoresTo5(result: EvalResult): void {
   const needsRescale =
     (result.overallScore && result.overallScore > 5) ||
@@ -1105,7 +1148,7 @@ export async function evaluateOutput(
 ${overlayBlock}
 
 ## 평가 대상 콘텐츠
-${content.slice(0, 12000)}
+${sampleContentForEvaluation(content)}
 
 ## 규칙
 - 3-Lens 평가 (Elite Critic / Mainstream Audience / Production)
@@ -1146,6 +1189,12 @@ ${content.slice(0, 12000)}
       const raw = await provider.chat(sysPrompt, userMsg, { maxTokens: 6000, temperature: 0, model: MODEL_EVALUATOR });
       const parsed = JSON.parse(extractJsonBlock(raw)) as EvalResult;
       normalizeScoresTo5(parsed);
+      // Override AI-calculated scores with code-computed weighted score
+      if (parsed.criteria?.length) {
+        const computed = computeWeightedScore(parsed.criteria);
+        parsed.weightedScore = computed;
+        parsed.overallScore = computed;
+      }
       runs.push(parsed);
     } catch {
       /* skip failed parse */
@@ -1437,14 +1486,14 @@ export async function optimizePrompt(
 ### 사용자 원래 아이디어
 ${userIdea.slice(0, 1000)}
 
-### 현재 Base 프롬프트 (일부)
-${basePrompt.slice(0, 6000)}
+### 현재 Base 프롬프트 (전문)
+${basePrompt}
 
 ### 현재 프로젝트별 보충 규칙
 ${currentSupplement || '(없음 - 아직 보충이 추가되지 않음)'}
 
 ### Generator 출력 (요약)
-${generatorOutput.slice(0, 4000)}
+${generatorOutput.slice(0, 2000)}
 
 ### Evaluator 평가 결과
 - Overall Score: ${evaluation.weightedScore || evaluation.overallScore}
@@ -1493,13 +1542,9 @@ ${plannerFeedback}
     const result = JSON.parse(extractJsonBlock(raw)) as PromptOptimizeResult;
 
     if (result.fullSupplement) {
-      // Project-specific: save as-is (may contain content-specific references)
       promptSupplementRepo.upsert(projectId, stage, result.fullSupplement, JSON.stringify(result.diagnosis));
 
-      // Global: only save if it looks content-agnostic (no Korean proper nouns that look like character names)
-      // The Prompt Optimizer is now instructed to avoid content-specific rules, but we double-check
-      const hasProperNouns = /[가-힣]{2,4}=[가-힣]|서준혁|윤서|하린|다인|가현|유진|한서아/.test(result.fullSupplement);
-      if (!hasProperNouns) {
+      if (isContentAgnostic(result.fullSupplement)) {
         promptSupplementRepo.upsertGlobal(stage, result.fullSupplement, JSON.stringify(result.diagnosis));
       }
     }

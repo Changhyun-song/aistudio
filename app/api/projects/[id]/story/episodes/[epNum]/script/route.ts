@@ -7,7 +7,7 @@ import { generateEpisodeScript } from '@/lib/story';
 import { isAIConfigured } from '@/lib/ai';
 import type { GenreOverlay } from '@/types';
 
-export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string; epNum: string }> }) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string; epNum: string }> }) {
   const { id, epNum } = await params;
   const epNumber = parseInt(epNum, 10);
 
@@ -30,8 +30,11 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     if (raw?.genre_stack?.length) genreOverlay = raw;
   } catch { /* empty */ }
 
+  const body = await req.json().catch(() => ({}));
+  const revisionFeedback: string | undefined = body.revisionFeedback;
+
   try {
-    const result = await generateEpisodeScript(bible, arc, characters, concept?.approved_markdown, genreOverlay, id);
+    const result = await generateEpisodeScript(bible, arc, characters, concept?.approved_markdown, genreOverlay, id, revisionFeedback);
     const script = storyEpisodeScriptRepo.upsert(
       id, epNumber,
       result.markdownScript || '',

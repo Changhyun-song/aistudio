@@ -41,6 +41,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const body = await req.json().catch(() => ({}));
   const density = body.density === 'balanced' ? 'balanced' : 'cinematic_detail';
   const videoProvider: VideoProvider = body.videoProvider === 'seedance_2_0' ? 'seedance_2_0' : 'higgsfield';
+  const revisionFeedback: string | undefined = body.revisionFeedback;
 
   let genreOverlay: GenreOverlay | undefined;
   try {
@@ -52,7 +53,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const result = await generateFrameAndVideoPackets(
       bible, arc,
       { scenes: scenes as Parameters<typeof generateFrameAndVideoPackets>[2]['scenes'] },
-      characters, density, genreOverlay, videoProvider, id,
+      characters, density, genreOverlay, videoProvider, id, revisionFeedback,
     );
 
     if (result.boundaryFrames?.length) {

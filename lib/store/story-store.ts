@@ -402,12 +402,23 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
   // ── Prompt Optimizer ──────────────────────────────────
   optimizeStagePrompt: async (pid, stage, generatorOutput, evaluation, plannerFeedback) => {
     try {
-      await fetch(`/api/projects/${pid}/story/optimize-prompt`, {
+      const res = await fetch(`/api/projects/${pid}/story/optimize-prompt`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ stage, generatorOutput, evaluation, plannerFeedback }),
       });
-    } catch { /* non-critical */ }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Unknown' }));
+        console.error(`[Optimizer] Stage ${stage} failed:`, err);
+        return false;
+      }
+      const result = await res.json();
+      console.log(`[Optimizer] Stage ${stage} v${result.version || '?'} saved. Confidence: ${result.confidence || '?'}`);
+      return true;
+    } catch (err) {
+      console.error(`[Optimizer] Stage ${stage} exception:`, err);
+      return false;
+    }
   },
 
   // ══════════════════════════════════════════════════════
@@ -458,9 +469,59 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
       return res as EvalResult;
     };
 
+    const callPlanner = async (taskType: EvalTaskType, ev: EvalResult, attempt: number, strategies: string[]): Promise<{ decision: string; revisionTargets: any[]; replanReason: string; nextAction: string }> => {
+      try {
+        const res = await apiPost(`/api/projects/${pid}/story/plan`, {
+          action: 'interpret',
+          taskType,
+          evaluation: ev,
+          loop: attempt,
+          previousStrategies: strategies,
+        });
+        return res;
+      } catch {
+        return { decision: 'revise_partial', revisionTargets: [], replanReason: '', nextAction: 'revise' };
+      }
+    };
+
+    const buildPlannerRevisionBrief = (ev: EvalResult, plannerResult: any, score: number, target: number): string => {
+      const parts: string[] = [];
+      parts.push(`★ 현재 점수: ${score.toFixed(1)}/5 | 목표: ${target}/5 | ${(target - score).toFixed(1)}점 부족`);
+
+      const lowestCriteria = ev.criteria
+        ?.slice().sort((a: any, b: any) => (a.score || 0) - (b.score || 0)).slice(0, 3)
+        .map((c: any) => `[${c.score}/5] ${c.name}`).join(', ') || '';
+      if (lowestCriteria) parts.push(`★ 가장 낮은 항목: ${lowestCriteria}`);
+
+      // Planner revision targets (structured feedback)
+      if (plannerResult?.revisionTargets?.length) {
+        parts.push('\n## Planner 수정 전략:');
+        for (const rt of plannerResult.revisionTargets) {
+          const target = typeof rt.target === 'string' ? rt.target : JSON.stringify(rt.target);
+          const problem = typeof rt.problem === 'string' ? rt.problem : JSON.stringify(rt.problem);
+          const fix = typeof rt.fixStrategy === 'string' ? rt.fixStrategy : JSON.stringify(rt.fixStrategy);
+          parts.push(`- [${rt.priority || 'medium'}] ${target}: ${problem} → ${fix}`);
+        }
+      }
+
+      if (ev.revisionBrief) {
+        const brief = typeof ev.revisionBrief === 'string' ? ev.revisionBrief : JSON.stringify(ev.revisionBrief);
+        parts.push(`\n## Evaluator 수정 지시:\n${brief}`);
+      }
+
+      const weaknesses = ev.topWeaknesses?.map((w: any) => {
+        const issue = typeof w === 'string' ? w : w?.issue || JSON.stringify(w);
+        const fix = typeof w === 'string' ? '' : w?.fixDirection || '';
+        return fix ? `${issue} → ${fix}` : issue;
+      }).join('\n') || '';
+      if (weaknesses) parts.push(`\n약점 상세:\n${weaknesses}`);
+
+      parts.push(`\n반드시 위 지시를 직접 해결해서 점수를 ${target} 이상으로 올려라.`);
+      return parts.filter(Boolean).join('\n');
+    };
+
     const passesThreshold = (ev: EvalResult): boolean => {
       const score = ev.weightedScore || ev.overallScore || 0;
-      // Pass if score meets target. Critical issues only block if score is borderline.
       if (score >= targetScore) return true;
       if (score >= targetScore - 0.1 && ev.finalVerdict === 'approve') return true;
       return false;
@@ -487,6 +548,7 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
       let prevScore = 0;
       let stagnantCount = 0;
       let bestScore = 0;
+      const ai1Strategies: string[] = [];
 
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         if (shouldAbort()) throw new Error('Pipeline stopped by user');
@@ -509,7 +571,19 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
           break;
         }
 
-        // Detect stagnation: if score didn't improve by at least 0.1
+        // Call Planner for structured revision strategy
+        log('AI 1', `Planner 분석 중...`, 'info');
+        const plannerResult = await callPlanner('concept', ev, attempt, ai1Strategies);
+        ai1Strategies.push(plannerResult.decision || 'revise');
+        set({ plannerDecision: plannerResult });
+        log('AI 1', `Planner 결정: ${plannerResult.decision} | ${(plannerResult.replanReason || '').slice(0, 60)}`, 'info');
+
+        if (plannerResult.decision === 'approve') {
+          log('AI 1', `Planner 승인! 다음 단계로 진행.`, 'success');
+          break;
+        }
+
+        // Detect stagnation
         if (Math.abs(score - prevScore) < 0.15) {
           stagnantCount++;
         } else {
@@ -519,17 +593,18 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
 
         set({ pipelineStage: 'ai1_revise', generating: 'revise' });
 
-        const revisionBrief = buildRevisionBrief(ev, score, targetScore);
+        const revisionBrief = buildPlannerRevisionBrief(ev, plannerResult, score, targetScore);
 
-        if (attempt === 1 || attempt % 5 === 0) {
+        if (attempt === 1 || attempt % 2 === 0) {
           log('AI 1', `프롬프트 최적화 중... (${attempt}회차)`, 'info');
-          await get().optimizeStagePrompt(pid, 'ai1', get().concept?.approved_markdown || '', ev, revisionBrief);
-          log('AI 1', '프롬프트 보충 규칙 업데이트 완료', 'success');
+          const optimizeSuccess = await get().optimizeStagePrompt(pid, 'ai1', get().concept?.approved_markdown || '', ev, revisionBrief);
+          log('AI 1', optimizeSuccess ? '보충 규칙 업데이트 완료' : '보충 규칙 업데이트 실패', optimizeSuccess ? 'success' : 'warn');
         }
 
-        // Strategy: if stagnant for 2+ rounds, regenerate from scratch instead of revising
-        if (stagnantCount >= 2) {
-          log('AI 1', `⚡ 점수 정체 ${stagnantCount}회 → 전략 변경: 처음부터 재생성합니다`, 'warn');
+        // Strategy: if stagnant 2+ or planner says revise_full, regenerate from scratch
+        if (stagnantCount >= 2 || plannerResult.decision === 'revise_full') {
+          const reason = stagnantCount >= 2 ? `점수 정체 ${stagnantCount}회` : 'Planner: revise_full';
+          log('AI 1', `⚡ ${reason} → 전략 변경: 처음부터 재생성합니다`, 'warn');
           stagnantCount = 0;
           try {
             const fresh = await apiPost(`/api/projects/${pid}/story/concept`, { action: 'generate', ...inputData });
@@ -540,11 +615,11 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
             set({ generating: null });
           }
         } else {
-          log('AI 1', `수정 중... attempt ${attempt}/${maxRetries} (${revisionBrief.slice(0, 80)}...)`, 'info');
+          log('AI 1', `수정 중... attempt ${attempt}/${maxRetries}`, 'info');
           try {
             const revised = await apiPost(`/api/projects/${pid}/story/concept`, { action: 'revise', feedback: revisionBrief });
             set({ concept: revised, generating: null });
-            log('AI 1', `v${revised.version} 수정 완료 (개선된 프롬프트 적용)`, 'success');
+            log('AI 1', `v${revised.version} 수정 완료`, 'success');
           } catch (revErr) {
             log('AI 1', `수정 실패: ${(revErr as Error).message}. 재시도합니다...`, 'warn');
             set({ generating: null });
@@ -571,6 +646,7 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
 
       {
         let ai2BestScore = 0;
+        const ai2Strategies: string[] = [];
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
           if (shouldAbort()) throw new Error('Pipeline stopped by user');
 
@@ -592,17 +668,28 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
             break;
           }
 
+          log('AI 2', `Planner 분석 중...`, 'info');
+          const plannerResult = await callPlanner('season', ev, attempt, ai2Strategies);
+          ai2Strategies.push(plannerResult.decision || 'revise');
+          log('AI 2', `Planner 결정: ${plannerResult.decision}`, 'info');
+
+          if (plannerResult.decision === 'approve') {
+            log('AI 2', `Planner 승인!`, 'success');
+            break;
+          }
+
           set({ pipelineStage: 'ai2_revise', generating: 'season' });
-          const ai2Brief = buildRevisionBrief(ev, score, targetScore);
-          if (attempt === 1 || attempt % 5 === 0) {
-          log('AI 2', `프롬프트 최적화 중... (${attempt}회차)`, 'info');
-          await get().optimizeStagePrompt(pid, 'ai2', JSON.stringify(get().episodes.slice(0, 3)), ev, ai2Brief);
-          log('AI 2', '프롬프트 보충 규칙 업데이트 완료', 'success');
-        }
+          const ai2Brief = buildPlannerRevisionBrief(ev, plannerResult, score, targetScore);
+
+          if (attempt === 1 || attempt % 2 === 0) {
+            log('AI 2', `프롬프트 최적화 중... (${attempt}회차)`, 'info');
+            const ok = await get().optimizeStagePrompt(pid, 'ai2', JSON.stringify(get().episodes.slice(0, 3)), ev, ai2Brief);
+            log('AI 2', ok ? '보충 규칙 업데이트 완료' : '보충 규칙 업데이트 실패', ok ? 'success' : 'warn');
+          }
 
           log('AI 2', `시즌 플랜 재생성 중... attempt ${attempt}/${maxRetries}`, 'info');
           try {
-            const reSeasonResult = await apiPost(`/api/projects/${pid}/story/season`);
+            const reSeasonResult = await apiPost(`/api/projects/${pid}/story/season`, { revisionFeedback: ai2Brief });
             const reEps: StoryEpisodeArc[] = Array.isArray(reSeasonResult) ? reSeasonResult : [];
             set({ episodes: reEps, generating: null });
             log('AI 2', `시즌 플랜 재생성 완료 (${reEps.length}화)`, 'success');
@@ -653,15 +740,17 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
           }
 
           set({ generating: 'script' });
-          const scriptBrief = buildRevisionBrief(ev, score, targetScore);
-          if (ep === 1 && (attempt === 1 || attempt % 5 === 0)) {
+          const plannerResult = await callPlanner('script', ev, attempt, []);
+          const scriptBrief = buildPlannerRevisionBrief(ev, plannerResult, score, targetScore);
+
+          if ([1, Math.ceil(epCount / 2), epCount].includes(ep) && (attempt === 1 || attempt % 2 === 0)) {
             log('AI 2', `대본 프롬프트 최적화 중... (${attempt}회차)`, 'info');
-            await get().optimizeStagePrompt(pid, 'ai2', get().script?.markdown || '', ev, scriptBrief);
-            log('AI 2', '프롬프트 보충 규칙 업데이트 완료', 'success');
+            const ok = await get().optimizeStagePrompt(pid, 'ai2', get().script?.markdown || '', ev, scriptBrief);
+            log('AI 2', ok ? '보충 규칙 업데이트 완료' : '보충 규칙 업데이트 실패', ok ? 'success' : 'warn');
           }
           log('AI 2', `EP${ep} 대본 재생성 중... attempt ${attempt}/${maxRetries}`, 'info');
           try {
-            const reScript = await apiPost(`/api/projects/${pid}/story/episodes/${ep}/script`);
+            const reScript = await apiPost(`/api/projects/${pid}/story/episodes/${ep}/script`, { revisionFeedback: scriptBrief });
             set({ script: reScript, generating: null });
           } catch (reScriptErr) {
             log('AI 2', `EP${ep} 대본 재생성 실패: ${(reScriptErr as Error).message}`, 'warn');
@@ -710,23 +799,31 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
           }
 
           set({ pipelineStage: 'ai3_revise', generating: 'clips' });
-          const clipBrief = buildRevisionBrief(ev, score, targetScore);
-          if (ep === 1 && (attempt === 1 || attempt % 5 === 0)) {
+          const plannerResult = await callPlanner('clips', ev, attempt, []);
+          const clipBrief = buildPlannerRevisionBrief(ev, plannerResult, score, targetScore);
+
+          if ([1, Math.ceil(epCount / 2), epCount].includes(ep) && (attempt === 1 || attempt % 2 === 0)) {
             log('AI 3', `클립 프롬프트 최적화 중... (${attempt}회차)`, 'info');
-            await get().optimizeStagePrompt(pid, 'ai3', JSON.stringify(get().clips.slice(0, 3)), ev, clipBrief);
-            log('AI 3', '프롬프트 보충 규칙 업데이트 완료', 'success');
+            const ok = await get().optimizeStagePrompt(pid, 'ai3', JSON.stringify(get().clips.slice(0, 3)), ev, clipBrief);
+            log('AI 3', ok ? '보충 규칙 업데이트 완료' : '보충 규칙 업데이트 실패', ok ? 'success' : 'warn');
           }
           log('AI 3', `EP${ep} 클립 재생성 중... attempt ${attempt}/${maxRetries}`, 'info');
-          const reClip = await apiPost(`/api/projects/${pid}/story/episodes/${ep}/clips`, {
-            density: 'cinematic_detail',
-            videoProvider,
-          });
-          set({
-            clips: Array.isArray(reClip.clips) ? reClip.clips : [],
-            frames: Array.isArray(reClip.frames) ? reClip.frames : [],
-            timeline: reClip.timeline || '',
-            generating: null,
-          });
+          try {
+            const reClip = await apiPost(`/api/projects/${pid}/story/episodes/${ep}/clips`, {
+              density: 'cinematic_detail',
+              videoProvider,
+              revisionFeedback: clipBrief,
+            });
+            set({
+              clips: Array.isArray(reClip.clips) ? reClip.clips : [],
+              frames: Array.isArray(reClip.frames) ? reClip.frames : [],
+              timeline: reClip.timeline || '',
+              generating: null,
+            });
+          } catch (clipErr) {
+            log('AI 3', `EP${ep} 클립 재생성 실패: ${(clipErr as Error).message}`, 'warn');
+            set({ generating: null });
+          }
         }
 
         set({ pipelineStage: 'ai3_clips' });

@@ -6,8 +6,13 @@ const PROMPTS_DIR = path.join(process.cwd(), 'docs', 'ai-prompts');
 const cache = new Map<string, string>();
 
 export function loadSystemPrompt(filename: string): string {
-  if (cache.has(filename)) return cache.get(filename)!;
   const filePath = path.join(PROMPTS_DIR, filename);
+
+  if (process.env.NODE_ENV === 'development') {
+    return fs.readFileSync(filePath, 'utf-8');
+  }
+
+  if (cache.has(filename)) return cache.get(filename)!;
   const content = fs.readFileSync(filePath, 'utf-8');
   cache.set(filename, content);
   return content;
@@ -37,8 +42,9 @@ export function getEvaluatorPrompt(stage?: string): string {
     case 'story_architect':
     case 'concept':
       return loadSystemPrompt('AI_Evaluator_Story.md');
-    case 'screenplay_director':
     case 'season':
+      return loadSystemPrompt('AI_Evaluator_SeasonPlan.md');
+    case 'screenplay_director':
     case 'script':
       return loadSystemPrompt('AI_Evaluator_Screenplay.md');
     case 'frame_video_designer':
