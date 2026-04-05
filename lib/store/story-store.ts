@@ -830,13 +830,27 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
       }
 
       // ════════════ Complete ════════════
-      set({ pipelineStage: 'complete', pipelineRunning: false, generating: null });
       log('완료', `전체 파이프라인 완료! AI1→AI2→AI3 (${epCount}화) 모두 생성 및 검증됨.`, 'success');
+      set({ pipelineStage: 'complete', pipelineRunning: false, generating: null });
+      try {
+        await fetch(`/api/projects/${pid}/pipeline-logs`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ logs: get().pipelineLogs, stage: 'complete' }),
+        });
+      } catch { /* non-critical */ }
 
     } catch (err) {
       const msg = (err as Error).message;
-      set({ pipelineStage: 'failed', pipelineRunning: false, generating: null, error: msg });
       log('오류', msg, 'error');
+      set({ pipelineStage: 'failed', pipelineRunning: false, generating: null, error: msg });
+      try {
+        await fetch(`/api/projects/${pid}/pipeline-logs`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ logs: get().pipelineLogs, stage: 'failed' }),
+        });
+      } catch { /* non-critical */ }
     }
   },
 }));

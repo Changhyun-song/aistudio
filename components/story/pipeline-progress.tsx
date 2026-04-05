@@ -127,6 +127,32 @@ export function PipelineProgress() {
           <Badge variant="outline" className={`text-[10px] ${isComplete ? 'bg-emerald-500/20 text-emerald-400' : isFailed ? 'bg-red-500/20 text-red-400' : 'bg-purple-500/20 text-purple-400'}`}>
             {STAGE_LABELS[pipelineStage]}
           </Badge>
+          {pipelineLogs.length > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 text-[10px]"
+              onClick={() => {
+                const text = pipelineLogs.map(l => {
+                  const time = new Date(l.timestamp).toLocaleTimeString('ko-KR', {
+                    hour: '2-digit', minute: '2-digit', second: '2-digit'
+                  });
+                  const icons: Record<string, string> = { success: '✓', warn: '⚠', error: '✗', score: '★', info: '→' };
+                  return `${time} ${icons[l.type] || '→'} [${l.stage}] ${l.message}`;
+                }).join('\n');
+                navigator.clipboard.writeText(text).then(() => {
+                  const btn = document.activeElement as HTMLButtonElement;
+                  if (btn) {
+                    const orig = btn.textContent;
+                    btn.textContent = '복사됨!';
+                    setTimeout(() => { btn.textContent = orig; }, 1500);
+                  }
+                });
+              }}
+            >
+              로그 복사
+            </Button>
+          )}
           {pipelineRunning && (
             <Button size="sm" variant="destructive" className="h-6 text-[10px]" onClick={stopPipeline}>
               중지
