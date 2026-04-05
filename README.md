@@ -1,33 +1,92 @@
-# CharaCraft — AI-Powered Midjourney Character Studio
+# AI Studio — AI-Powered Content Creation Pipeline
 
-캐릭터를 자연어로 설명하면 AI가 Midjourney용 프롬프트를 생성하고, 반복 수정 → 최종 선택 → 20장 확장 → Soul ID용 데이터셋 패키징까지 한 곳에서 처리하는 웹 도구입니다.
+캐릭터 디자인부터 시리즈 스토리 개발, 영상 프롬프트 생성까지 — AI가 창작 전 과정을 자동화하는 통합 웹 스튜디오입니다.
 
-## 핵심 전제
+## 주요 기능
 
-- **이 앱은 ChatGPT GPTs를 임베드하지 않습니다.** 앱 내 Prompt Assistant는 OpenAI API 기반입니다.
-- **Midjourney 공식 API를 전제로 하지 않습니다.** 사용자가 Midjourney 웹 Create 또는 Discord Bot으로 이미지를 생성하고, 본 앱에 다시 업로드하는 Manual Mode입니다.
-- Midjourney V7 기준, `--oref` (Omni Reference)로 동일 인물 확장이 가능하지만, MVP 1차에서는 프롬프트 세트 생성까지만 구현합니다.
-- Soul ID용 데이터셋은 **얼굴만이 아니라 전신/상반신/측면/감정/약한 배경 컷**이 섞여야 합니다. (Higgsfield 가이드: 최소 20장, 고화질, 여러 각도, 전신 최소 1장)
+### 1. Story Studio (AI 시나리오 파이프라인)
 
-## 제품 흐름
+3단계 AI 체인으로 시리즈 드라마를 자동 생성합니다.
+
+| 단계 | AI 역할 | 출력 |
+|------|---------|------|
+| AI 1 — Story Architect | 컨셉 3개 생성 → 선택 → 시리즈 바이블 | 캐릭터, 세계관, 시즌 아크 |
+| AI 2 — Screenplay Director | 시즌 플랜 → 에피소드별 대본 | 씬 비트, 대사, 연출 지시 |
+| AI 3 — Frame & Video Prompt Designer | 대본 → 영상 클립 프롬프트 | Higgsfield / Seedance 2.0 호환 |
+
+- **Generator → Evaluator → Planner 루프**: 각 단계에서 3-Lens 평가(엘리트 비평, 대중 매력, 프로덕션 적합성) 후 자동 수정
+- **원클릭 파이프라인**: 아이디어 하나로 AI 1→2→3 전체 자동 실행, 목표 점수 도달까지 반복
+- **멀티 프로젝트 동시 실행**: 프로젝트별 파이프라인 상태를 DB에 저장, 프로젝트 목록에서 실시간 진행률 확인
+- **프롬프트 자가 개선**: Optimizer AI가 평가 피드백을 분석해 시스템 프롬프트를 점진적으로 개선
+
+### 2. Story Warehouse (스토리 아이디어 파이프라인)
+
+4단계 창작 시뮬레이션으로 스토리 아이디어를 대량 생성하고 큐레이션합니다.
+
+| 단계 | 방식 | 설명 |
+|------|------|------|
+| Seed Generator | 랜덤 조합 (AI 없음) | 107개 소재 풀에서 장르/배경/What-if/아이러니 등 3~5개 조합 |
+| Premise Builder | AI (temp=0.95) | 씨앗 → 로그라인, 시놉시스, 갈등, 톤 등 스토리 전제 2개 생성 |
+| Idea Evaluator | AI (temp=0) | 참신함/갈등/공감/시각/확장성 5개 기준 평가, 3.5점 이상 필터링 |
+| Bulk Pipeline | 배치 | 5 씨앗 × 2 전제 = 10개 생성 → 평가 → 통과한 아이디어만 카드 표시 |
+
+- **자가 개선**: 사용자가 선택한 아이디어의 씨앗 패턴 가중치 자동 상승
+- **Story Studio 연동**: "이걸로 시작" 버튼으로 바로 시나리오 개발 전환
+
+### 3. Reference Lab (레퍼런스 분석)
+
+외부 참고 자료를 수집·분석해 Story Studio에 전달합니다.
+
+- 텍스트, 링크, 이미지, 영상/자막 등 다양한 소스 입력
+- AI가 구조적 영감 데이터로 합성 (표절 방지)
+- 4탭 UI: Sources → Analysis → Synthesis → Send to Story Studio
+
+### 4. Character Studio (캐릭터 이미지 생성)
+
+#### Midjourney 프롬프트 생성
+- 자연어 캐릭터 설명 → AI가 Midjourney용 프롬프트 자동 생성
+- 반복 수정 → 최종 선택 → 20장 포즈 확장 → ZIP 데이터셋 내보내기
+
+#### 서사 → 비주얼 변환 (Story Studio 연동)
+- Story Studio의 캐릭터 서사 정보를 5종 MJ 프롬프트로 AI 변환
+  - Base Portrait / Emotional Portrait / Full Body / Action / Expression Sheet
+
+#### Characterizer (40-Shot)
+- Gemini API 기반 캐릭터 일관성 유지 포즈 생성
+
+### 5. 영상 프로바이더 지원
+
+| 프로바이더 | 클립 길이 | 특징 |
+|-----------|----------|------|
+| Higgsfield Cinema Studio | 4~20초 | Frame Chain, Boundary Frames |
+| Seedance 2.0 | 4~15초 | Multi-shot Cinematic, Shot/Camera/Reveal/Pacing Progression |
+
+## 시스템 아키텍처
 
 ```
-[Brief] 자연어 또는 폼으로 캐릭터 설명
-    ↓ AI가 구조화 + 프롬프트 생성
-[Prompt Lab] 프롬프트 확인 → Midjourney에 복사/실행 → 결과 업로드 → 보완 요청 → 반복
-    ↓ 마음에 드는 결과 나올 때까지
-[Select] 업로드된 후보 중 최종 1장 BASE CHARACTER 지정
-    ↓
-[Variants] AI가 동일 인물 기준 20장 프롬프트 자동 생성 → 각각 MJ 실행 → 업로드 → Keep/Reject/Maybe
-    ↓
-[Dataset] 최종 선택 이미지 + metadata.json + prompts.txt → ZIP 다운로드
+┌─────────────────────────────────────────────────────────┐
+│                     Web UI (Next.js)                     │
+│  Projects │ Story Studio │ Story Warehouse │ Ref Lab     │
+└────────────────────────┬────────────────────────────────┘
+                         │
+┌────────────────────────▼────────────────────────────────┐
+│                    AI Engine Layer                        │
+│                                                          │
+│  Generator ←→ Evaluator ←→ Planner ←→ Optimizer         │
+│  (GPT-5.4)    (5.4-mini)  (5.4-mini)  (5.4-mini)       │
+│                                                          │
+│  System Prompts: docs/ai-prompts/*.md                    │
+└────────────────────────┬────────────────────────────────┘
+                         │
+┌────────────────────────▼────────────────────────────────┐
+│                   Data Layer (SQLite)                     │
+│                                                          │
+│  projects │ story_concepts │ story_bibles │ episodes     │
+│  characters │ clips │ pipeline_runs │ pipeline_stages    │
+│  story_warehouse │ seed_weight_log │ ai_usage_logs      │
+│  character_visual_prompts │ prompt_supplements           │
+└─────────────────────────────────────────────────────────┘
 ```
-
-## 사용자가 준비해야 하는 것
-
-1. **OpenAI API Key** — AI 프롬프트 생성에 필요 (없으면 Fallback 템플릿 모드로 동작)
-2. **Midjourney 구독** — 이미지 생성을 위해 Midjourney 웹 또는 Discord 접근 필요
-3. **Node.js 18+** — 로컬 실행 환경
 
 ## 기술 스택
 
@@ -35,11 +94,71 @@
 |------|------|
 | Framework | Next.js 16 (App Router, Turbopack) |
 | Language | TypeScript |
-| Styling | Tailwind CSS v4 + shadcn/ui |
+| Styling | Tailwind CSS v4 + shadcn/ui (base-ui) |
 | State | Zustand |
-| Database | SQLite (better-sqlite3) |
-| AI | OpenAI API (GPT-4o) |
+| Database | SQLite (better-sqlite3) — Local-first |
+| AI | OpenAI API (GPT-5.4 / GPT-5.4-mini) |
+| Image AI | Google Gemini (Characterizer) |
 | Export | archiver (ZIP) |
+
+## 프로젝트 구조
+
+```
+app/
+  page.tsx                              # 랜딩
+  projects/page.tsx                     # 프로젝트 목록 + 파이프라인 현황
+  projects/[id]/
+    story-studio/page.tsx               # Story Studio 메인 (AI 1/2/3 + 파이프라인)
+    references/page.tsx                 # Reference Lab
+    brief/page.tsx                      # 캐릭터 Brief 입력
+    prompt-lab/page.tsx                 # MJ 프롬프트 생성/수정
+    select/page.tsx                     # Base Character 선택
+    variants/page.tsx                   # 20장 확장 프롬프트
+    characterizer/page.tsx              # 40-Shot Characterizer
+    dataset/page.tsx                    # 데이터셋 Export
+  story-warehouse/page.tsx              # Story Warehouse
+  api/
+    projects/[id]/story/...             # Story Studio API (concept, bible, season, episodes, clips, evaluate, plan, export 등)
+    projects/[id]/pipeline/             # 파이프라인 상태 관리 API
+    projects/[id]/usage/                # AI 비용 추적 API
+    pipelines/active/                   # 전체 프로젝트 파이프라인 현황
+    story-warehouse/                    # Story Warehouse API (생성, CRUD)
+
+lib/
+  ai/index.ts                          # OpenAI Provider + 모델 설정 + 비용 로깅
+  story/
+    index.ts                            # Story AI 모듈 re-export
+    generators.ts                       # AI 1/2/3 생성 함수
+    evaluator.ts                        # 3-Lens 평가 AI
+    planner.ts                          # 수정 전략 수립 AI
+    optimizer.ts                        # 프롬프트 자가 개선 AI
+    character-visual.ts                 # 서사→MJ 비주얼 프롬프트 변환
+    utils.ts                            # 공통 유틸리티
+  story-warehouse/
+    seed-pools.ts                       # 107개 소재 풀 정의
+    seed-generator.ts                   # 가중치 기반 랜덤 씨앗 조합
+    premise-builder.ts                  # AI 스토리 전제 생성
+    idea-evaluator.ts                   # AI 아이디어 평가/필터링
+    pipeline.ts                         # 4단계 파이프라인 오케스트레이션
+  store/
+    story-store.ts                      # Story Studio Zustand 스토어 (파이프라인 실행 포함)
+  db/
+    schema.ts                           # SQLite 스키마 정의
+    repository.ts                       # Repository 패턴 DB 추상화
+
+docs/
+  ai-prompts/                           # AI 시스템 프롬프트 (Markdown)
+    AI_1_Story_Architect.md
+    AI_2_Screenplay_Director.md
+    AI_3_Frame_Video_Prompt_Designer.md
+    AI_Evaluator_Story.md / _Screenplay.md / _FrameVideo.md / _SeasonPlan.md
+    AI_Planner_Story.md / _Screenplay.md / _FrameVideo.md
+    AI_Prompt_Optimizer.md
+    Reference_Lab_System_Prompt.md
+  PROMPT_SYSTEM_ARCHITECTURE.md         # 프롬프트 시스템 아키텍처 문서
+
+types/index.ts                          # 전체 TypeScript 인터페이스
+```
 
 ## 로컬 실행
 
@@ -47,7 +166,7 @@
 # 의존성 설치
 npm install
 
-# OpenAI API 키 설정
+# 환경 변수 설정
 cp .env.local.example .env.local
 # .env.local 파일에서 OPENAI_API_KEY 입력
 
@@ -57,110 +176,64 @@ npm run dev
 # http://localhost:3000 접속
 ```
 
-### Windows 참고
-- better-sqlite3는 네이티브 바인딩을 사용합니다. Visual Studio Build Tools가 필요할 수 있습니다.
-- 문제가 있으면 WSL2 + Ubuntu에서 실행하는 것을 권장합니다.
+### .env.local 설정
 
 ```bash
-# WSL2 Ubuntu
+# 필수
+OPENAI_API_KEY=sk-your-key-here
+
+# 기본 모델 (선택, 기본값: gpt-5.4-mini)
+OPENAI_MODEL=gpt-5.4-mini
+
+# 역할별 모델 세분화 (선택)
+OPENAI_MODEL_GENERATOR=gpt-5.4       # AI 1/2/3 생성 — 고품질
+OPENAI_MODEL_EVALUATOR=gpt-5.4-mini  # 평가
+OPENAI_MODEL_PLANNER=gpt-5.4-mini    # 플래너
+OPENAI_MODEL_OPTIMIZER=gpt-5.4-mini  # 프롬프트 최적화
+
+# Characterizer용 (선택)
+GEMINI_API_KEY=your-gemini-key
+```
+
+### Windows 참고
+
+better-sqlite3는 네이티브 바인딩을 사용합니다. Visual Studio Build Tools가 필요할 수 있습니다.
+
+```bash
+# WSL2 Ubuntu에서 실행 (권장)
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt-get install -y nodejs build-essential
 cd /mnt/c/character
 npm install && npm run dev
 ```
 
-### .env.local 설정
+## AI 파이프라인 흐름
+
+### Story Studio 원클릭 파이프라인
 
 ```
-OPENAI_API_KEY=sk-your-key-here
-OPENAI_MODEL=gpt-4o          # 선택, 기본값 gpt-4o
+[아이디어 입력] → AI 1 컨셉 생성 → 평가 → (수정 반복) → 통과
+    → AI 2 바이블/시즌플랜/대본 → 평가 → (수정 반복) → 통과
+    → AI 3 영상 클립 프롬프트 → 평가 → (수정 반복) → 통과
+    → 시즌 일관성 평가 → 완료
 ```
 
-API 키 없이도 앱은 동작합니다. AI 프롬프트 생성만 Fallback 템플릿 모드로 전환됩니다.
+각 단계에서:
+1. **Generator** — 콘텐츠 생성 (temp=0.8)
+2. **Evaluator** — 3-Lens 평가: 엘리트 비평 / 대중 매력 / 프로덕션 적합성 (temp=0)
+3. **Planner** — 평가 기반 수정 전략 결정 (approve / revise_partial / revise_full)
+4. **Optimizer** — 누적 피드백 분석 → 시스템 프롬프트 보완 규칙 자동 생성
 
-## AI Prompt Assistant
-
-세 가지 AI 함수가 핵심입니다:
-
-| 함수 | 역할 | 트리거 |
-|------|------|--------|
-| `generateCharacterPrompt(brief)` | 캐릭터 brief → MJ 프롬프트 1개 | Brief 페이지 "AI 프롬프트 생성" |
-| `reviseCharacterPrompt(brief, prev, feedback)` | 피드백 반영 수정 프롬프트 1개 | Prompt Lab "수정 프롬프트 생성" |
-| `generateTwentyPromptSet(brief, summary)` | 동일 인물 20장 프롬프트 세트 | Variants "AI 20장 생성" |
-
-추가로 `structureBrief(naturalInput)` — 자연어 입력을 구조화된 brief JSON으로 변환합니다.
-
-Provider Abstraction (`AIProvider` 인터페이스)을 통해 나중에 다른 LLM으로 교체 가능합니다.
-
-## Fixed 20-Shot Template
-
-모든 캐릭터에 동일 구조 사용:
-
-| # | Shot | 설명 |
-|---|------|------|
-| 1 | Base Portrait | 정면 중립 포트레이트 |
-| 2 | Front Portrait | 정면 아이컨택 |
-| 3 | Three-Quarter | 45도 |
-| 4 | Left Side | 좌측면 |
-| 5 | Right Side | 우측면 |
-| 6 | Half Body | 상반신 |
-| 7 | Full Body Standing | 전신 서있는 |
-| 8 | Classroom Desk | 교실 책상 |
-| 9 | Classroom Window | 교실 창가 |
-| 10 | Hallway Walking | 복도 |
-| 11 | Just-Woke-Up | 방금 깬 |
-| 12 | Surprised Reaction | 놀란 |
-| 13 | Soft Smile | 미소 |
-| 14 | School Stairs | 계단 |
-| 15 | Library | 도서관 |
-| 16 | Rooftop | 옥상 |
-| 17 | Rainy Window | 비오는 창가 |
-| 18 | After-School Casual | 방과 후 |
-| 19 | Full Body Reference | 전신 레퍼런스 |
-| 20 | Dramatic Close-Up | 드라마틱 클로즈업 |
-
-## Midjourney 프롬프트 파라미터
-
-- 캐릭터 생성용: `--ar 2:3 --v 7 --raw --stylize 50`
-- 20장 확장용: `--ar 2:3 --v 7 --raw --stylize 35~45`
-
-## 프로젝트 구조
+### Story Warehouse 파이프라인
 
 ```
-app/
-  projects/page.tsx              # 프로젝트 목록
-  projects/[id]/
-    brief/page.tsx               # 자연어 + 폼 입력
-    prompt-lab/page.tsx          # AI 프롬프트 생성/수정/업로드
-    select/page.tsx              # BASE CHARACTER 선택
-    variants/page.tsx            # 20장 확장 프롬프트
-    dataset/page.tsx             # 데이터셋 & Export
-  api/
-    ai/route.ts                  # AI 엔드포인트 (4가지 action)
-    projects/...                 # CRUD
-    upload/route.ts              # 이미지 업로드
-
-lib/
-  ai/                            # OpenAI API + system prompts + provider abstraction
-  prompt-engine/                 # Fallback 템플릿 프롬프트 생성
-  providers/                     # Midjourney adapter (Manual / Discord placeholder)
-  store/                         # Zustand 스토어
-  db/                            # SQLite + Repository
-
-types/index.ts                   # 타입, 20-Shot 정의
+[버튼 클릭] → 씨앗 5세트 (랜덤) → 전제 10개 (AI) → 평가 (AI) → 3.5점+ 필터 → 카드 표시
 ```
-
-## 미완성/Placeholder 항목
-
-- **Semi-Auto Discord Mode**: `lib/providers/discord.ts`에 인터페이스만 존재. Discord bot webhook 연동은 미구현.
-- **--oref 자동 삽입**: 20장 프롬프트에 `--oref` URL 자동 주입은 미구현. 사용자가 프롬프트를 수동 편집하여 추가 가능.
-- **이미지 자동 다운로드**: 외부 URL 이미지를 로컬로 자동 저장하는 기능 미구현. ZIP에는 로컬 업로드 이미지만 포함.
 
 ## 향후 확장
 
-- [ ] `--oref` 기반 동일 인물 자동 참조
-- [ ] Discord Bot webhook semi-auto 모드
-- [ ] Supabase로 DB 마이그레이션
-- [ ] Higgsfield Soul Cinema 연동
-- [ ] 멀티 캐릭터 프로젝트
-- [ ] 팀 협업
+- [ ] 트렌드 분석 → 소재 풀 자동 업데이트
+- [ ] Supabase 클라우드 DB 마이그레이션
+- [ ] 팀 협업 (멀티유저)
+- [ ] Discord Bot 연동 semi-auto 모드
+- [ ] 영상 프로바이더 API 직접 연동
