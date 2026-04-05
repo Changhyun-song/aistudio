@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAppStore } from '@/lib/store';
 import { Button } from '@/components/ui/button';
@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import type { ProjectMode } from '@/types';
+import type { ProjectMode, PipelineRunSummary } from '@/types';
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   draft: { label: '초안', color: 'bg-zinc-600' },
@@ -27,32 +27,65 @@ const MODE_LABELS: Record<ProjectMode, { label: string; badge: string }> = {
   story_studio: { label: 'Story Studio', badge: 'bg-emerald-600' },
 };
 
+const PIPELINE_STAGE_LABELS: Record<string, string> = {
+  idle: '대기',
+  ai1_concept: 'AI 1: 컨셉 생성',
+  ai1_eval: 'AI 1: 컨셉 평가',
+  ai1_revise: 'AI 1: 컨셉 수정',
+  ai2_bible: 'AI 2: Bible 생성',
+  ai2_season: 'AI 2: 시즌 플랜',
+  ai2_eval: 'AI 2: 시즌 평가',
+  ai2_revise: 'AI 2: 시즌 수정',
+  ai2_scripts: 'AI 2: 대본 생성',
+  ai3_clips: 'AI 3: 클립 생성',
+  ai3_eval: 'AI 3: 클립 평가',
+  ai3_revise: 'AI 3: 클립 수정',
+  season_coherence: '시즌 일관성 평가',
+  complete: '완료',
+  failed: '실패',
+};
+
 export default function ProjectsPage() {
   const router = useRouter();
   const { projects, fetchProjects, createProject, deleteProject } = useAppStore();
   const [newName, setNewName] = useState('');
   const [newDesc, setNewDesc] = useState('');
-  const [newMode, setNewMode] = useState<ProjectMode>('midjourney_manual');
+  const [newMode, setNewMode] = useState<ProjectMode>('story_studio');
   const [open, setOpen] = useState(false);
+  const [pipelineMap, setPipelineMap] = useState<Record<string, PipelineRunSummary>>({});
 
-  useEffect(() => { fetchProjects(); }, [fetchProjects]);
+  const fetchPipelines = useCallback(async () => {
+    try {
+      const res = await fetch('/api/pipelines/active');
+      const data: PipelineRunSummary[] = await res.json();
+      const map: Record<string, PipelineRunSummary> = {};
+      for (const p of data) map[p.project_id] = p;
+      setPipelineMap(map);
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => { fetchProjects(); fetchPipelines(); }, [fetchProjects, fetchPipelines]);
+
+  useEffect(() => {
+    const hasRunning = Object.values(pipelineMap).some(p => p.status === 'running');
+    if (!hasRunning) return;
+    const interval = setInterval(fetchPipelines, 3000);
+    return () => clearInterval(interval);
+  }, [pipelineMap, fetchPipelines]);
 
   const handleCreate = async () => {
     if (!newName.trim()) return;
     const p = await createProject(newName, newDesc, newMode);
-    setNewName(''); setNewDesc(''); setNewMode('midjourney_manual'); setOpen(false);
-    const dest = p.mode === 'story_studio'
-      ? `/projects/${p.id}/story-studio`
-      : p.mode === 'characterizer_40'
-        ? `/projects/${p.id}/characterizer`
-        : `/projects/${p.id}/brief`;
+    setNewName(''); setNewDesc(''); setNewMode('story_studio'); setOpen(false);
+    const dest = p.mode === 'midjourney_manual'
+      ? `/projects/${p.id}/brief`
+      : `/projects/${p.id}/story-studio`;
     router.push(dest);
   };
 
   const getProjectLink = (p: { id: string; mode?: string }) => {
-    if (p.mode === 'story_studio') return `/projects/${p.id}/story-studio`;
-    if (p.mode === 'characterizer_40') return `/projects/${p.id}/characterizer`;
-    return `/projects/${p.id}/brief`;
+    if (p.mode === 'midjourney_manual') return `/projects/${p.id}/brief`;
+    return `/projects/${p.id}/story-studio`;
   };
 
   return (
@@ -60,38 +93,33 @@ export default function ProjectsPage() {
       <header className="border-b border-border bg-card/50 backdrop-blur-sm">
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-bold tracking-tight">CharaCraft</h1>
-            <p className="text-xs text-muted-foreground">AI Character Pipeline Studio</p>
+            <h1 className="text-xl font-bold tracking-tight">AI Studio</h1>
+            <p className="text-xs text-muted-foreground">Story + Character Pipeline</p>
           </div>
+          <Button variant="outline" className="mr-2" onClick={() => router.push('/story-warehouse')}>
+            Story Warehouse
+          </Button>
           <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger render={<Button />}>+ 새 캐릭터</DialogTrigger>
+            <DialogTrigger render={<Button />}>+ 새 프로젝트</DialogTrigger>
             <DialogContent>
-              <DialogHeader><DialogTitle>새 캐릭터 프로젝트</DialogTitle></DialogHeader>
+              <DialogHeader><DialogTitle>새 프로젝트</DialogTitle></DialogHeader>
               <div className="space-y-4">
-                {/* Mode Selection */}
                 <div>
-                  <Label className="mb-2 block">파이프라인 모드</Label>
-                  <div className="grid grid-cols-3 gap-3">
+                  <Label className="mb-2 block">프로젝트 유형</Label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      onClick={() => setNewMode('story_studio')}
+                      className={`rounded-lg border-2 p-4 text-left transition-all ${newMode !== 'midjourney_manual' ? 'border-emerald-500 bg-emerald-500/10' : 'border-border hover:border-border/80'}`}
+                    >
+                      <div className="text-sm font-semibold mb-1">AI Studio</div>
+                      <div className="text-xs text-muted-foreground">스토리 기획 + 캐릭터 시각화 + 영상 프롬프트 통합</div>
+                    </button>
                     <button
                       onClick={() => setNewMode('midjourney_manual')}
                       className={`rounded-lg border-2 p-4 text-left transition-all ${newMode === 'midjourney_manual' ? 'border-blue-500 bg-blue-500/10' : 'border-border hover:border-border/80'}`}
                     >
-                      <div className="text-sm font-semibold mb-1">🎨 MJ Manual</div>
-                      <div className="text-xs text-muted-foreground">AI 프롬프트 → MJ 수동 실행 → 20샷 확장</div>
-                    </button>
-                    <button
-                      onClick={() => setNewMode('characterizer_40')}
-                      className={`rounded-lg border-2 p-4 text-left transition-all ${newMode === 'characterizer_40' ? 'border-purple-500 bg-purple-500/10' : 'border-border hover:border-border/80'}`}
-                    >
-                      <div className="text-sm font-semibold mb-1">⚡ 40-Shot Auto</div>
-                      <div className="text-xs text-muted-foreground">기준 이미지 1장 → Nano Banana 2로 40샷 생성</div>
-                    </button>
-                    <button
-                      onClick={() => setNewMode('story_studio')}
-                      className={`rounded-lg border-2 p-4 text-left transition-all ${newMode === 'story_studio' ? 'border-emerald-500 bg-emerald-500/10' : 'border-border hover:border-border/80'}`}
-                    >
-                      <div className="text-sm font-semibold mb-1">🎬 Story Studio</div>
-                      <div className="text-xs text-muted-foreground">시리즈 기획 → Higgsfield 영상 프롬프트 생성</div>
+                      <div className="text-sm font-semibold mb-1">MJ Legacy</div>
+                      <div className="text-xs text-muted-foreground">Midjourney 수동 워크플로우 (레거시)</div>
                     </button>
                   </div>
                 </div>
@@ -122,8 +150,11 @@ export default function ProjectsPage() {
             {projects.map(p => {
               const st = STATUS_LABELS[p.status] || STATUS_LABELS.draft;
               const mode = MODE_LABELS[(p.mode || 'midjourney_manual') as ProjectMode] || MODE_LABELS.midjourney_manual;
+              const pipeline = pipelineMap[p.id];
+              const isRunning = pipeline?.status === 'running';
+              const pct = pipeline?.progress_pct ?? 0;
               return (
-                <Card key={p.id} className="hover:border-primary/50 transition-colors cursor-pointer group" onClick={() => router.push(getProjectLink(p))}>
+                <Card key={p.id} className={`hover:border-primary/50 transition-colors cursor-pointer group ${isRunning ? 'border-emerald-500/40' : ''}`} onClick={() => router.push(getProjectLink(p))}>
                   <CardHeader className="pb-3">
                     <div className="flex items-start justify-between">
                       <CardTitle className="text-lg group-hover:text-primary transition-colors">{p.name}</CardTitle>
@@ -135,6 +166,30 @@ export default function ProjectsPage() {
                   </CardHeader>
                   <CardContent>
                     {p.description && <p className="text-sm text-muted-foreground mb-3 line-clamp-2">{p.description}</p>}
+
+                    {pipeline && (
+                      <div className="mb-3 space-y-2">
+                        <div className="flex items-center gap-2">
+                          {isRunning && <span className="relative flex h-2 w-2 shrink-0"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" /><span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" /></span>}
+                          <span className="text-xs font-medium text-emerald-400">
+                            {pipeline.current_stage_label || PIPELINE_STAGE_LABELS[pipeline.current_stage] || pipeline.current_stage}
+                          </span>
+                          {pipeline.status === 'completed' && <Badge className="bg-emerald-600 text-white text-[10px] h-4">완료</Badge>}
+                          {pipeline.status === 'failed' && <Badge className="bg-red-600 text-white text-[10px] h-4">실패</Badge>}
+                          {pipeline.status === 'aborted' && <Badge className="bg-yellow-600 text-white text-[10px] h-4">중단</Badge>}
+                        </div>
+                        {(isRunning || pipeline.status === 'completed') && (
+                          <div className="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all duration-500 ${isRunning ? 'bg-emerald-500' : 'bg-emerald-600'}`}
+                              style={{ width: `${Math.min(pct, 100)}%` }}
+                            />
+                          </div>
+                        )}
+                        {isRunning && <span className="text-[10px] text-muted-foreground">{pct}%</span>}
+                      </div>
+                    )}
+
                     <div className="flex items-center justify-between text-xs text-muted-foreground">
                       <span>{new Date(p.created_at).toLocaleDateString('ko-KR')}</span>
                       <Button variant="ghost" size="sm" className="opacity-0 group-hover:opacity-100 text-destructive hover:text-destructive" onClick={e => { e.stopPropagation(); if (confirm('삭제하시겠습니까?')) deleteProject(p.id); }}>삭제</Button>

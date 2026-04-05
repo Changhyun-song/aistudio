@@ -10,6 +10,8 @@ import type {
   StoryConcept, StoryBoundaryFrame,
   ReferenceSource, ReferenceAnalysis, ReferenceSynthesis,
   ReferenceSourceType, StoryInputBridge,
+  CharacterVisualPrompt,
+  PipelineRun, PipelineStage, PipelineRunStatus, PipelineRunSummary,
 } from '@/types';
 
 function now() {
@@ -350,6 +352,9 @@ export const storyCharacterRepo = {
   deleteAll(projectId: string): void {
     getDb().prepare('DELETE FROM story_characters WHERE project_id = ?').run(projectId);
   },
+  deleteByProject(projectId: string): void {
+    getDb().prepare('DELETE FROM story_characters WHERE project_id = ?').run(projectId);
+  },
   replaceBatch(projectId: string, items: Partial<Omit<StoryCharacter, 'id' | 'project_id' | 'created_at' | 'updated_at'>>[]): StoryCharacter[] {
     const db = getDb();
     db.prepare('DELETE FROM story_characters WHERE project_id = ?').run(projectId);
@@ -367,10 +372,61 @@ export const storyCharacterRepo = {
   },
 };
 
+// ── Character Visual Prompts ──────────────────────────
+export const characterVisualPromptRepo = {
+  listByProject(projectId: string): CharacterVisualPrompt[] {
+    return getDb().prepare('SELECT * FROM character_visual_prompts WHERE project_id = ? ORDER BY character_name ASC').all(projectId) as CharacterVisualPrompt[];
+  },
+  getByCharacter(characterId: string): CharacterVisualPrompt | undefined {
+    return getDb().prepare('SELECT * FROM character_visual_prompts WHERE character_id = ?').get(characterId) as CharacterVisualPrompt | undefined;
+  },
+  upsert(projectId: string, characterId: string, data: Partial<Omit<CharacterVisualPrompt, 'id' | 'project_id' | 'character_id' | 'created_at' | 'updated_at'>>): CharacterVisualPrompt {
+    const existing = this.getByCharacter(characterId);
+    if (existing) {
+      const sets: string[] = [];
+      const vals: unknown[] = [];
+      for (const [k, v] of Object.entries(data)) {
+        if (k === 'id' || k === 'project_id' || k === 'character_id' || k === 'created_at') continue;
+        sets.push(`${k} = ?`);
+        vals.push(v);
+      }
+      sets.push('updated_at = ?');
+      vals.push(now());
+      vals.push(existing.id);
+      if (sets.length > 1) getDb().prepare(`UPDATE character_visual_prompts SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+      return this.getByCharacter(characterId)!;
+    }
+    const id = nanoid(12);
+    const ts = now();
+    getDb().prepare(
+      `INSERT INTO character_visual_prompts (id, project_id, character_id, character_name, visual_brief, mj_base_prompt, mj_portrait_prompt, mj_full_body_prompt, mj_action_prompt, mj_expression_sheet, negative_prompts, style_keywords, raw_json, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      id, projectId, characterId,
+      data.character_name ?? '', data.visual_brief ?? '',
+      data.mj_base_prompt ?? '', data.mj_portrait_prompt ?? '',
+      data.mj_full_body_prompt ?? '', data.mj_action_prompt ?? '',
+      data.mj_expression_sheet ?? '', data.negative_prompts ?? '',
+      data.style_keywords ?? '', data.raw_json ?? '{}',
+      data.status ?? 'generated', ts, ts,
+    );
+    return this.getByCharacter(characterId)!;
+  },
+  deleteByProject(projectId: string): void {
+    getDb().prepare('DELETE FROM character_visual_prompts WHERE project_id = ?').run(projectId);
+  },
+  deleteByCharacter(characterId: string): void {
+    getDb().prepare('DELETE FROM character_visual_prompts WHERE character_id = ?').run(characterId);
+  },
+};
+
 // ── Story Bible ───────────────────────────────────────
 export const storyBibleRepo = {
   getByProject(projectId: string): StorySeriesBible | undefined {
     return getDb().prepare('SELECT * FROM story_bibles WHERE project_id = ?').get(projectId) as StorySeriesBible | undefined;
+  },
+  deleteByProject(projectId: string): void {
+    getDb().prepare('DELETE FROM story_bibles WHERE project_id = ?').run(projectId);
   },
   upsert(projectId: string, data: Partial<Omit<StorySeriesBible, 'id' | 'project_id' | 'created_at' | 'updated_at'>>): StorySeriesBible {
     const existing = this.getByProject(projectId);
@@ -398,6 +454,9 @@ export const storyBibleRepo = {
 export const storyEpisodeArcRepo = {
   listByProject(projectId: string): StoryEpisodeArc[] {
     return getDb().prepare('SELECT * FROM story_episode_arcs WHERE project_id = ? ORDER BY episode_number ASC').all(projectId) as StoryEpisodeArc[];
+  },
+  deleteByProject(projectId: string): void {
+    getDb().prepare('DELETE FROM story_episode_arcs WHERE project_id = ?').run(projectId);
   },
   get(id: string): StoryEpisodeArc | undefined {
     return getDb().prepare('SELECT * FROM story_episode_arcs WHERE id = ?').get(id) as StoryEpisodeArc | undefined;
@@ -434,6 +493,9 @@ export const storyEpisodeScriptRepo = {
   getByEpisode(projectId: string, epNum: number): StoryEpisodeScript | undefined {
     return getDb().prepare('SELECT * FROM story_episode_scripts WHERE project_id = ? AND episode_number = ?').get(projectId, epNum) as StoryEpisodeScript | undefined;
   },
+  deleteByProject(projectId: string): void {
+    getDb().prepare('DELETE FROM story_episode_scripts WHERE project_id = ?').run(projectId);
+  },
   upsert(projectId: string, epNum: number, markdown: string, scenesJson: string): StoryEpisodeScript {
     const existing = this.getByEpisode(projectId, epNum);
     if (existing) {
@@ -452,6 +514,9 @@ export const storyEpisodeScriptRepo = {
 export const storyClipPacketRepo = {
   listByEpisode(projectId: string, epNum: number): StoryClipPacket[] {
     return getDb().prepare('SELECT * FROM story_clip_packets WHERE project_id = ? AND episode_number = ? ORDER BY clip_number ASC').all(projectId, epNum) as StoryClipPacket[];
+  },
+  deleteByProject(projectId: string): void {
+    getDb().prepare('DELETE FROM story_clip_packets WHERE project_id = ?').run(projectId);
   },
   get(id: string): StoryClipPacket | undefined {
     return getDb().prepare('SELECT * FROM story_clip_packets WHERE id = ?').get(id) as StoryClipPacket | undefined;
@@ -480,6 +545,9 @@ export const storyConceptRepo = {
   getByProject(projectId: string): StoryConcept | undefined {
     return getDb().prepare('SELECT * FROM story_concepts WHERE project_id = ?').get(projectId) as StoryConcept | undefined;
   },
+  deleteByProject(projectId: string): void {
+    getDb().prepare('DELETE FROM story_concepts WHERE project_id = ?').run(projectId);
+  },
   upsert(projectId: string, data: Partial<Omit<StoryConcept, 'id' | 'project_id' | 'created_at'>>): StoryConcept {
     const existing = this.getByProject(projectId);
     const fields = ['raw_input', 'genre', 'tone', 'world_keywords', 'romance_level', 'mystery_level', 'action_level', 'ending_mood', 'target_audience', 'genre_overlay_json', 'approved_markdown', 'approved_json', 'version'] as const;
@@ -506,6 +574,9 @@ export const storyConceptRepo = {
 export const storyBoundaryFrameRepo = {
   listByEpisode(projectId: string, epNum: number): StoryBoundaryFrame[] {
     return getDb().prepare('SELECT * FROM story_boundary_frames WHERE project_id = ? AND episode_number = ? ORDER BY frame_id ASC').all(projectId, epNum) as StoryBoundaryFrame[];
+  },
+  deleteByProject(projectId: string): void {
+    getDb().prepare('DELETE FROM story_boundary_frames WHERE project_id = ?').run(projectId);
   },
   get(id: string): StoryBoundaryFrame | undefined {
     return getDb().prepare('SELECT * FROM story_boundary_frames WHERE id = ?').get(id) as StoryBoundaryFrame | undefined;
@@ -679,5 +750,363 @@ export const promptSupplementRepo = {
   },
   resetGlobal(): void {
     getDb().prepare('DELETE FROM prompt_supplements WHERE project_id = ?').run(GLOBAL_PROJECT_ID);
+  },
+};
+
+// ── Prompt Supplement Rules ────────────────────────────
+
+export interface PromptSupplementRule {
+  id: string;
+  project_id: string;
+  stage: string;
+  rule_text: string;
+  source: string;
+  status: string;
+  score_before: number | null;
+  score_after: number | null;
+  effectiveness: number | null;
+  apply_count: number;
+  success_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export const promptSupplementRuleRepo = {
+  listByStage(projectId: string, stage: string): PromptSupplementRule[] {
+    return getDb().prepare(
+      'SELECT * FROM prompt_supplement_rules WHERE project_id = ? AND stage = ? ORDER BY created_at DESC'
+    ).all(projectId, stage) as PromptSupplementRule[];
+  },
+  listActive(projectId: string, stage: string): PromptSupplementRule[] {
+    return getDb().prepare(
+      `SELECT * FROM prompt_supplement_rules WHERE project_id = ? AND stage = ? AND status = 'active' ORDER BY effectiveness DESC NULLS LAST`
+    ).all(projectId, stage) as PromptSupplementRule[];
+  },
+  create(entry: {
+    projectId: string;
+    stage: string;
+    ruleText: string;
+    source?: string;
+    scoreBefore?: number;
+  }): PromptSupplementRule {
+    const id = nanoid(12);
+    const ts = now();
+    getDb().prepare(
+      `INSERT INTO prompt_supplement_rules (id, project_id, stage, rule_text, source, status, score_before, apply_count, success_count, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'candidate', ?, 0, 0, ?, ?)`
+    ).run(id, entry.projectId, entry.stage, entry.ruleText, entry.source || 'optimizer', entry.scoreBefore ?? null, ts, ts);
+    return getDb().prepare('SELECT * FROM prompt_supplement_rules WHERE id = ?').get(id) as PromptSupplementRule;
+  },
+  recordApplication(id: string, scoreAfter: number): void {
+    const rule = getDb().prepare('SELECT * FROM prompt_supplement_rules WHERE id = ?').get(id) as PromptSupplementRule | undefined;
+    if (!rule) return;
+    const newApplyCount = (rule.apply_count || 0) + 1;
+    const scoreBefore = rule.score_before ?? 0;
+    const improved = scoreAfter > scoreBefore;
+    const newSuccessCount = improved ? (rule.success_count || 0) + 1 : (rule.success_count || 0);
+    const effectiveness = newApplyCount > 0 ? newSuccessCount / newApplyCount : null;
+    const newStatus = newApplyCount >= 3
+      ? ((effectiveness ?? 0) >= 0.5 ? 'active' : 'retired')
+      : 'candidate';
+    getDb().prepare(
+      `UPDATE prompt_supplement_rules SET score_after = ?, apply_count = ?, success_count = ?, effectiveness = ?, status = ?, updated_at = ? WHERE id = ?`
+    ).run(scoreAfter, newApplyCount, newSuccessCount, effectiveness, newStatus, now(), id);
+  },
+  retire(id: string): void {
+    getDb().prepare(`UPDATE prompt_supplement_rules SET status = 'retired', updated_at = ? WHERE id = ?`).run(now(), id);
+  },
+  deleteByProject(projectId: string): void {
+    getDb().prepare('DELETE FROM prompt_supplement_rules WHERE project_id = ?').run(projectId);
+  },
+};
+
+// ── Story Warehouse ───────────────────────────────────
+
+export interface StoryWarehouseItem {
+  id: string;
+  title: string;
+  logline: string;
+  genre: string;
+  tone: string;
+  hook: string;
+  target_audience: string;
+  tags: string;
+  source: string;
+  status: string;
+  project_id: string | null;
+  raw_json: string;
+  seed_json: string;
+  synopsis: string;
+  inner_conflict: string;
+  outer_obstacle: string;
+  expected_episodes: string;
+  eval_freshness: number;
+  eval_conflict: number;
+  eval_empathy: number;
+  eval_visual: number;
+  eval_expandability: number;
+  eval_overall: number;
+  eval_verdict: string;
+  eval_summary: string;
+  pick_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export const storyWarehouseRepo = {
+  list(limit = 50, offset = 0): StoryWarehouseItem[] {
+    return getDb().prepare('SELECT * FROM story_warehouse ORDER BY created_at DESC LIMIT ? OFFSET ?')
+      .all(limit, offset) as StoryWarehouseItem[];
+  },
+  get(id: string): StoryWarehouseItem | undefined {
+    return getDb().prepare('SELECT * FROM story_warehouse WHERE id = ?').get(id) as StoryWarehouseItem | undefined;
+  },
+  create(item: Partial<Omit<StoryWarehouseItem, 'id' | 'created_at' | 'updated_at'>>): StoryWarehouseItem {
+    const id = nanoid(12);
+    const ts = now();
+    getDb().prepare(
+      `INSERT INTO story_warehouse (id, title, logline, genre, tone, hook, target_audience, tags, source, status, project_id, raw_json, seed_json, synopsis, inner_conflict, outer_obstacle, expected_episodes, eval_freshness, eval_conflict, eval_empathy, eval_visual, eval_expandability, eval_overall, eval_verdict, eval_summary, pick_count, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      id, item.title ?? '', item.logline ?? '', item.genre ?? '', item.tone ?? '',
+      item.hook ?? '', item.target_audience ?? '', item.tags ?? '[]',
+      item.source ?? 'ai_generated', item.status ?? 'idea', item.project_id ?? null,
+      item.raw_json ?? '{}', item.seed_json ?? '{}',
+      item.synopsis ?? '', item.inner_conflict ?? '', item.outer_obstacle ?? '',
+      item.expected_episodes ?? '',
+      item.eval_freshness ?? 0, item.eval_conflict ?? 0, item.eval_empathy ?? 0,
+      item.eval_visual ?? 0, item.eval_expandability ?? 0, item.eval_overall ?? 0,
+      item.eval_verdict ?? '', item.eval_summary ?? '', item.pick_count ?? 0,
+      ts, ts,
+    );
+    return this.get(id)!;
+  },
+  update(id: string, fields: Partial<StoryWarehouseItem>): void {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      if (k === 'id' || k === 'created_at') continue;
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push('updated_at = ?');
+    vals.push(now());
+    vals.push(id);
+    getDb().prepare(`UPDATE story_warehouse SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  },
+  delete(id: string): void {
+    getDb().prepare('DELETE FROM story_warehouse WHERE id = ?').run(id);
+  },
+  search(query: string): StoryWarehouseItem[] {
+    const like = `%${query}%`;
+    return getDb().prepare(
+      `SELECT * FROM story_warehouse WHERE title LIKE ? OR logline LIKE ? OR genre LIKE ? OR tags LIKE ? ORDER BY created_at DESC LIMIT 50`
+    ).all(like, like, like, like) as StoryWarehouseItem[];
+  },
+};
+
+// ── AI Usage Logs ─────────────────────────────────────
+
+export interface AIUsageLog {
+  id: number;
+  project_id: string;
+  pipeline_run_id: string | null;
+  stage: string;
+  role: string;
+  model: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  estimated_cost_usd: number;
+  created_at: string;
+}
+
+const COST_PER_1K: Record<string, { input: number; output: number }> = {
+  'gpt-5.4':       { input: 0.01,  output: 0.03 },
+  'gpt-5.4-mini':  { input: 0.0004, output: 0.0016 },
+  'gpt-4o':        { input: 0.005, output: 0.015 },
+  'gpt-4o-mini':   { input: 0.00015, output: 0.0006 },
+};
+
+function estimateCost(model: string, promptTokens: number, completionTokens: number): number {
+  const key = Object.keys(COST_PER_1K).find(k => model.startsWith(k)) || 'gpt-5.4-mini';
+  const rate = COST_PER_1K[key] || COST_PER_1K['gpt-5.4-mini'];
+  return (promptTokens / 1000) * rate.input + (completionTokens / 1000) * rate.output;
+}
+
+export const aiUsageLogRepo = {
+  insert(entry: {
+    projectId: string;
+    pipelineRunId?: string;
+    stage: string;
+    role: string;
+    model: string;
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  }): void {
+    const cost = estimateCost(entry.model, entry.promptTokens, entry.completionTokens);
+    getDb().prepare(
+      `INSERT INTO ai_usage_logs (project_id, pipeline_run_id, stage, role, model, prompt_tokens, completion_tokens, total_tokens, estimated_cost_usd, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      entry.projectId, entry.pipelineRunId || null,
+      entry.stage, entry.role, entry.model,
+      entry.promptTokens, entry.completionTokens, entry.totalTokens,
+      Math.round(cost * 1000000) / 1000000,
+      now(),
+    );
+  },
+  getProjectTotal(projectId: string): { totalTokens: number; totalCostUsd: number; callCount: number } {
+    const row = getDb().prepare(
+      `SELECT COALESCE(SUM(total_tokens),0) as totalTokens, COALESCE(SUM(estimated_cost_usd),0) as totalCostUsd, COUNT(*) as callCount
+       FROM ai_usage_logs WHERE project_id = ?`
+    ).get(projectId) as any;
+    return { totalTokens: row.totalTokens, totalCostUsd: row.totalCostUsd, callCount: row.callCount };
+  },
+  getPipelineTotal(pipelineRunId: string): { totalTokens: number; totalCostUsd: number; callCount: number } {
+    const row = getDb().prepare(
+      `SELECT COALESCE(SUM(total_tokens),0) as totalTokens, COALESCE(SUM(estimated_cost_usd),0) as totalCostUsd, COUNT(*) as callCount
+       FROM ai_usage_logs WHERE pipeline_run_id = ?`
+    ).get(pipelineRunId) as any;
+    return { totalTokens: row.totalTokens, totalCostUsd: row.totalCostUsd, callCount: row.callCount };
+  },
+  getByProject(projectId: string, limit = 100): AIUsageLog[] {
+    return getDb().prepare(
+      'SELECT * FROM ai_usage_logs WHERE project_id = ? ORDER BY created_at DESC LIMIT ?'
+    ).all(projectId, limit) as AIUsageLog[];
+  },
+  deleteByProject(projectId: string): void {
+    getDb().prepare('DELETE FROM ai_usage_logs WHERE project_id = ?').run(projectId);
+  },
+};
+
+// ══════════════════════════════════════════════════════
+// ── Pipeline Runs ────────────────────────────────────
+// ══════════════════════════════════════════════════════
+
+export const pipelineRunRepo = {
+  create(projectId: string, opts: {
+    pipelineType?: string;
+    targetScore?: number;
+    maxRetries?: number;
+    currentStage?: string;
+    currentStageLabel?: string;
+  } = {}): PipelineRun {
+    const id = nanoid(16);
+    const ts = now();
+    getDb().prepare(
+      `INSERT INTO pipeline_runs (id, project_id, pipeline_type, status, current_stage, current_stage_label, progress_pct, target_score, max_retries, summary_json, started_at, updated_at)
+       VALUES (?, ?, ?, 'running', ?, ?, 0, ?, ?, '{}', ?, ?)`
+    ).run(
+      id, projectId,
+      opts.pipelineType ?? 'story_full',
+      opts.currentStage ?? 'idle',
+      opts.currentStageLabel ?? '',
+      opts.targetScore ?? 4.0,
+      opts.maxRetries ?? 3,
+      ts, ts,
+    );
+    return this.get(id)!;
+  },
+
+  get(id: string): PipelineRun | undefined {
+    return getDb().prepare('SELECT * FROM pipeline_runs WHERE id = ?').get(id) as PipelineRun | undefined;
+  },
+
+  getActiveByProject(projectId: string): PipelineRun | undefined {
+    return getDb().prepare(
+      `SELECT * FROM pipeline_runs WHERE project_id = ? AND status = 'running' ORDER BY started_at DESC LIMIT 1`
+    ).get(projectId) as PipelineRun | undefined;
+  },
+
+  listByProject(projectId: string, limit = 20): PipelineRun[] {
+    return getDb().prepare(
+      'SELECT * FROM pipeline_runs WHERE project_id = ? ORDER BY started_at DESC LIMIT ?'
+    ).all(projectId, limit) as PipelineRun[];
+  },
+
+  listActive(): PipelineRun[] {
+    return getDb().prepare(
+      `SELECT * FROM pipeline_runs WHERE status = 'running' ORDER BY started_at DESC`
+    ).all() as PipelineRun[];
+  },
+
+  listAllLatest(): PipelineRunSummary[] {
+    return getDb().prepare(
+      `SELECT r.id, r.project_id, r.pipeline_type, r.status, r.current_stage, r.current_stage_label, r.progress_pct, r.started_at, r.updated_at
+       FROM pipeline_runs r
+       INNER JOIN (
+         SELECT project_id, MAX(started_at) as max_started
+         FROM pipeline_runs
+         GROUP BY project_id
+       ) latest ON r.project_id = latest.project_id AND r.started_at = latest.max_started
+       ORDER BY r.started_at DESC`
+    ).all() as PipelineRunSummary[];
+  },
+
+  updateStage(id: string, stage: string, stageLabel: string, progressPct: number): void {
+    getDb().prepare(
+      `UPDATE pipeline_runs SET current_stage = ?, current_stage_label = ?, progress_pct = ?, updated_at = ? WHERE id = ?`
+    ).run(stage, stageLabel, progressPct, now(), id);
+  },
+
+  updateStatus(id: string, status: PipelineRunStatus, errorMessage?: string): void {
+    const sets = ['status = ?', 'updated_at = ?'];
+    const vals: unknown[] = [status, now()];
+    if (errorMessage !== undefined) {
+      sets.push('error_message = ?');
+      vals.push(errorMessage);
+    }
+    if (status === 'completed' || status === 'failed' || status === 'aborted') {
+      sets.push('completed_at = ?');
+      vals.push(now());
+    }
+    vals.push(id);
+    getDb().prepare(`UPDATE pipeline_runs SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  },
+
+  updateSummary(id: string, summary: Record<string, unknown>): void {
+    getDb().prepare(
+      `UPDATE pipeline_runs SET summary_json = ?, updated_at = ? WHERE id = ?`
+    ).run(JSON.stringify(summary), now(), id);
+  },
+
+  deleteByProject(projectId: string): void {
+    getDb().prepare('DELETE FROM pipeline_stages WHERE project_id = ?').run(projectId);
+    getDb().prepare('DELETE FROM pipeline_runs WHERE project_id = ?').run(projectId);
+  },
+};
+
+export const pipelineStageRepo = {
+  create(runId: string, projectId: string, stage: string, stageLabel: string, maxAttempts = 3): PipelineStage {
+    const result = getDb().prepare(
+      `INSERT INTO pipeline_stages (run_id, project_id, stage, stage_label, status, attempt, max_attempts, detail_json)
+       VALUES (?, ?, ?, ?, 'pending', 0, ?, '{}')`
+    ).run(runId, projectId, stage, stageLabel, maxAttempts);
+    return getDb().prepare('SELECT * FROM pipeline_stages WHERE id = ?').get(result.lastInsertRowid) as PipelineStage;
+  },
+
+  listByRun(runId: string): PipelineStage[] {
+    return getDb().prepare('SELECT * FROM pipeline_stages WHERE run_id = ? ORDER BY id ASC').all(runId) as PipelineStage[];
+  },
+
+  updateStatus(id: number, status: string, opts?: { attempt?: number; score?: number; detailJson?: string }): void {
+    const sets = ['status = ?'];
+    const vals: unknown[] = [status];
+    if (status === 'running' && !opts?.attempt) {
+      sets.push('started_at = ?');
+      vals.push(now());
+    }
+    if (opts?.attempt !== undefined) { sets.push('attempt = ?'); vals.push(opts.attempt); }
+    if (opts?.score !== undefined) { sets.push('score = ?'); vals.push(opts.score); }
+    if (opts?.detailJson !== undefined) { sets.push('detail_json = ?'); vals.push(opts.detailJson); }
+    if (status === 'completed' || status === 'failed') {
+      sets.push('completed_at = ?');
+      vals.push(now());
+    }
+    vals.push(id);
+    getDb().prepare(`UPDATE pipeline_stages SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
   },
 };

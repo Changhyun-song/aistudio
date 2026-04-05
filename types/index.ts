@@ -506,6 +506,75 @@ export interface StoryConcept {
   updated_at: string;
 }
 
+// ── Pipeline Persistence Models ──────────────────────
+
+export type PipelineRunStatus = 'running' | 'paused' | 'completed' | 'failed' | 'aborted';
+export type PipelineType = 'story_full' | 'story_stage' | 'character_shots';
+export type PipelineStageStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+
+export interface PipelineRun {
+  id: string;
+  project_id: string;
+  pipeline_type: PipelineType;
+  status: PipelineRunStatus;
+  current_stage: string;
+  current_stage_label: string;
+  progress_pct: number;
+  target_score: number;
+  max_retries: number;
+  error_message: string;
+  summary_json: string;
+  started_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
+export interface PipelineStage {
+  id: number;
+  run_id: string;
+  project_id: string;
+  stage: string;
+  stage_label: string;
+  status: PipelineStageStatus;
+  attempt: number;
+  max_attempts: number;
+  score: number | null;
+  detail_json: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface PipelineRunSummary {
+  id: string;
+  project_id: string;
+  pipeline_type: PipelineType;
+  status: PipelineRunStatus;
+  current_stage: string;
+  current_stage_label: string;
+  progress_pct: number;
+  started_at: string;
+  updated_at: string;
+}
+
+export interface CharacterVisualPrompt {
+  id: string;
+  project_id: string;
+  character_id: string;
+  character_name: string;
+  visual_brief: string;
+  mj_base_prompt: string;
+  mj_portrait_prompt: string;
+  mj_full_body_prompt: string;
+  mj_action_prompt: string;
+  mj_expression_sheet: string;
+  negative_prompts: string;
+  style_keywords: string;
+  raw_json: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface StoryBoundaryFrame {
   id: string;
   project_id: string;

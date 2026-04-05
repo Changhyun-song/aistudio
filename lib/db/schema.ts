@@ -137,6 +137,25 @@ CREATE TABLE IF NOT EXISTS story_characters (
   updated_at TEXT DEFAULT (datetime('now','localtime'))
 );
 
+CREATE TABLE IF NOT EXISTS character_visual_prompts (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  character_id TEXT NOT NULL,
+  character_name TEXT NOT NULL DEFAULT '',
+  visual_brief TEXT NOT NULL DEFAULT '',
+  mj_base_prompt TEXT NOT NULL DEFAULT '',
+  mj_portrait_prompt TEXT NOT NULL DEFAULT '',
+  mj_full_body_prompt TEXT NOT NULL DEFAULT '',
+  mj_action_prompt TEXT NOT NULL DEFAULT '',
+  mj_expression_sheet TEXT NOT NULL DEFAULT '',
+  negative_prompts TEXT NOT NULL DEFAULT '',
+  style_keywords TEXT NOT NULL DEFAULT '',
+  raw_json TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'generated',
+  created_at TEXT DEFAULT (datetime('now','localtime')),
+  updated_at TEXT DEFAULT (datetime('now','localtime'))
+);
+
 CREATE TABLE IF NOT EXISTS story_bibles (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL UNIQUE REFERENCES projects(id) ON DELETE CASCADE,
@@ -301,5 +320,92 @@ CREATE TABLE IF NOT EXISTS prompt_supplement_rules (
   success_count INTEGER DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now','localtime')),
   updated_at TEXT DEFAULT (datetime('now','localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS story_warehouse (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  logline TEXT NOT NULL DEFAULT '',
+  genre TEXT NOT NULL DEFAULT '',
+  tone TEXT NOT NULL DEFAULT '',
+  hook TEXT NOT NULL DEFAULT '',
+  target_audience TEXT NOT NULL DEFAULT '',
+  tags TEXT NOT NULL DEFAULT '[]',
+  source TEXT NOT NULL DEFAULT 'ai_generated',
+  status TEXT NOT NULL DEFAULT 'idea',
+  project_id TEXT,
+  raw_json TEXT NOT NULL DEFAULT '{}',
+  seed_json TEXT NOT NULL DEFAULT '{}',
+  synopsis TEXT NOT NULL DEFAULT '',
+  inner_conflict TEXT NOT NULL DEFAULT '',
+  outer_obstacle TEXT NOT NULL DEFAULT '',
+  expected_episodes TEXT NOT NULL DEFAULT '',
+  eval_freshness REAL DEFAULT 0,
+  eval_conflict REAL DEFAULT 0,
+  eval_empathy REAL DEFAULT 0,
+  eval_visual REAL DEFAULT 0,
+  eval_expandability REAL DEFAULT 0,
+  eval_overall REAL DEFAULT 0,
+  eval_verdict TEXT DEFAULT '',
+  eval_summary TEXT NOT NULL DEFAULT '',
+  pick_count INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now','localtime')),
+  updated_at TEXT DEFAULT (datetime('now','localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS seed_weight_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  category TEXT NOT NULL,
+  item_id TEXT NOT NULL,
+  item_value TEXT NOT NULL,
+  delta REAL NOT NULL DEFAULT 0,
+  reason TEXT NOT NULL DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS pipeline_runs (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  pipeline_type TEXT NOT NULL DEFAULT 'story_full',
+  status TEXT NOT NULL DEFAULT 'running',
+  current_stage TEXT NOT NULL DEFAULT 'idle',
+  current_stage_label TEXT NOT NULL DEFAULT '',
+  progress_pct INTEGER NOT NULL DEFAULT 0,
+  target_score REAL NOT NULL DEFAULT 4.0,
+  max_retries INTEGER NOT NULL DEFAULT 3,
+  error_message TEXT DEFAULT '',
+  summary_json TEXT NOT NULL DEFAULT '{}',
+  started_at TEXT DEFAULT (datetime('now','localtime')),
+  updated_at TEXT DEFAULT (datetime('now','localtime')),
+  completed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS pipeline_stages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id TEXT NOT NULL REFERENCES pipeline_runs(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL,
+  stage TEXT NOT NULL,
+  stage_label TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending',
+  attempt INTEGER NOT NULL DEFAULT 0,
+  max_attempts INTEGER NOT NULL DEFAULT 3,
+  score REAL,
+  detail_json TEXT NOT NULL DEFAULT '{}',
+  started_at TEXT,
+  completed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS ai_usage_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id TEXT NOT NULL,
+  pipeline_run_id TEXT,
+  stage TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'generator',
+  model TEXT NOT NULL,
+  prompt_tokens INTEGER NOT NULL DEFAULT 0,
+  completion_tokens INTEGER NOT NULL DEFAULT 0,
+  total_tokens INTEGER NOT NULL DEFAULT 0,
+  estimated_cost_usd REAL NOT NULL DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now','localtime'))
 );
 `;

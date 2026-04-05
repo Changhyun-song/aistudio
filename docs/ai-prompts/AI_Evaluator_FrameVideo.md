@@ -98,6 +98,24 @@
 
 ---
 
+## 채점 보정 예시 (Calibration)
+
+### 예시 A: overallScore 2.3 판정
+- timeline_accuracy 2: Clip 3→4에서 8초 gap 발생. 합계가 런타임보다 40초 짧음
+- framing_strength 2: 8개 클립 중 6개가 wide→medium→close 패턴
+- reveal_design 3: shot intention 라벨은 있지만 실제 reveal 순서가 불분명
+- provider_compliance 2: Higgsfield 클립 2개가 25초(max 20초 위반)
+→ 타임코드+provider 오류가 있어 export 불가. revise 필수.
+
+### 예시 B: overallScore 4.4 판정
+- timeline_accuracy 5: 타임코드 연속, 합계 정확, gap/overlap 없음
+- framing_strength 4: 대부분 의도적 설계. Clip 5~6의 reaction shot만 패턴 유사
+- reveal_design 5: body_to_face, environment_to_threat 등 clip마다 다른 reveal 구조
+- prompt_usability 4: 구체적이나 일부 프롬프트에서 조명/색감 정보 부족
+→ Clip 5~6 프레이밍 차별화 + 조명 디테일 보충 후 approve 가능.
+
+---
+
 ## 출력 형식
 
 반드시 유효한 JSON만 출력.

@@ -22,13 +22,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     try {
       if (resetType === 'soft' || resetType === 'project' || resetType === 'hard') {
         // Soft: clear outputs only, keep learned supplements
-        storyConceptRepo.deleteByProject?.(id);
-        storyBibleRepo.deleteByProject?.(id);
-        storyEpisodeArcRepo.deleteByProject?.(id);
-        storyEpisodeScriptRepo.deleteByProject?.(id);
-        storyClipPacketRepo.deleteByProject?.(id);
-        storyBoundaryFrameRepo.deleteByProject?.(id);
-        storyCharacterRepo.deleteByProject?.(id);
+        storyConceptRepo.deleteByProject(id);
+        storyBibleRepo.deleteByProject(id);
+        storyEpisodeArcRepo.deleteByProject(id);
+        storyEpisodeScriptRepo.deleteByProject(id);
+        storyClipPacketRepo.deleteByProject(id);
+        storyBoundaryFrameRepo.deleteByProject(id);
+        storyCharacterRepo.deleteByProject(id);
       }
       if (resetType === 'project' || resetType === 'hard') {
         promptSupplementRepo.deleteByProject(id);

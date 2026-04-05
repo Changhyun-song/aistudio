@@ -9,9 +9,34 @@ import type { CharacterBrief } from '@/types';
 
 // ── Provider Abstraction ─────────────────────────────
 
+export interface AIUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
+export interface AIChatResult {
+  text: string;
+  usage: AIUsage;
+  model: string;
+}
+
+export interface AIChatOpts {
+  maxTokens?: number;
+  temperature?: number;
+  model?: string;
+  trackingContext?: {
+    projectId: string;
+    pipelineRunId?: string;
+    stage: string;
+    role: string;
+  };
+}
+
 export interface AIProvider {
   name: string;
-  chat(system: string, user: string, opts?: { maxTokens?: number; temperature?: number; model?: string }): Promise<string>;
+  chat(system: string, user: string, opts?: AIChatOpts): Promise<string>;
+  chatWithUsage(system: string, user: string, opts?: AIChatOpts): Promise<AIChatResult>;
 }
 
 class OpenAIProvider implements AIProvider {
@@ -24,28 +49,75 @@ class OpenAIProvider implements AIProvider {
     this.defaultModel = process.env.OPENAI_MODEL || 'gpt-5.4-mini';
   }
 
-  async chat(system: string, user: string, opts?: { maxTokens?: number; temperature?: number; model?: string }): Promise<string> {
+  private buildRequest(system: string, user: string, opts?: AIChatOpts) {
     const model = opts?.model || this.defaultModel;
     const isLegacy = model.startsWith('gpt-4') || model.startsWith('gpt-3');
     const tokenParam = isLegacy
       ? { max_tokens: opts?.maxTokens ?? 4096 }
       : { max_completion_tokens: opts?.maxTokens ?? 4096 };
-    const res = await this.client.chat.completions.create({
+    return {
       model,
       messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user },
+        { role: 'system' as const, content: system },
+        { role: 'user' as const, content: user },
       ],
       temperature: opts?.temperature ?? 0.7,
       ...tokenParam,
-    });
+    };
+  }
+
+  private logUsage(opts: AIChatOpts | undefined, model: string, usage: AIUsage): void {
+    if (!opts?.trackingContext) return;
+    try {
+      const { aiUsageLogRepo } = require('@/lib/db/repository');
+      aiUsageLogRepo.insert({
+        projectId: opts.trackingContext.projectId,
+        pipelineRunId: opts.trackingContext.pipelineRunId,
+        stage: opts.trackingContext.stage,
+        role: opts.trackingContext.role,
+        model,
+        promptTokens: usage.promptTokens,
+        completionTokens: usage.completionTokens,
+        totalTokens: usage.totalTokens,
+      });
+    } catch { /* best-effort logging */ }
+  }
+
+  async chat(system: string, user: string, opts?: AIChatOpts): Promise<string> {
+    const req = this.buildRequest(system, user, opts);
+    const res = await this.client.chat.completions.create(req);
+    const usage: AIUsage = {
+      promptTokens: res.usage?.prompt_tokens ?? 0,
+      completionTokens: res.usage?.completion_tokens ?? 0,
+      totalTokens: res.usage?.total_tokens ?? 0,
+    };
+    this.logUsage(opts, req.model, usage);
     return res.choices[0]?.message?.content?.trim() || '';
+  }
+
+  async chatWithUsage(system: string, user: string, opts?: AIChatOpts): Promise<AIChatResult> {
+    const req = this.buildRequest(system, user, opts);
+    const res = await this.client.chat.completions.create(req);
+    const usage: AIUsage = {
+      promptTokens: res.usage?.prompt_tokens ?? 0,
+      completionTokens: res.usage?.completion_tokens ?? 0,
+      totalTokens: res.usage?.total_tokens ?? 0,
+    };
+    this.logUsage(opts, req.model, usage);
+    return {
+      text: res.choices[0]?.message?.content?.trim() || '',
+      usage,
+      model: req.model,
+    };
   }
 }
 
 class FallbackProvider implements AIProvider {
   name = 'fallback';
-  async chat(_system: string, _user: string): Promise<string> {
+  async chat(_system: string, _user: string, _opts?: AIChatOpts): Promise<string> {
+    throw new Error('OPENAI_API_KEY is not configured. Please set it in .env.local');
+  }
+  async chatWithUsage(_system: string, _user: string, _opts?: AIChatOpts): Promise<AIChatResult> {
     throw new Error('OPENAI_API_KEY is not configured. Please set it in .env.local');
   }
 }

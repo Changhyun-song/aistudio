@@ -19,6 +19,7 @@ const STAGE_LABELS: Record<PipelineStage, string> = {
   ai3_clips: 'AI 3: 클립 생성',
   ai3_eval: 'AI 3: 평가',
   ai3_revise: 'AI 3: 수정',
+  season_coherence: '시즌 일관성 평가',
   complete: '완료',
   failed: '오류',
 };
@@ -27,6 +28,7 @@ const STAGE_ORDER: PipelineStage[] = [
   'ai1_concept', 'ai1_eval', 'ai1_revise',
   'ai2_bible', 'ai2_season', 'ai2_eval', 'ai2_revise', 'ai2_scripts',
   'ai3_clips', 'ai3_eval', 'ai3_revise',
+  'season_coherence',
   'complete',
 ];
 
@@ -71,10 +73,11 @@ function getScoreLogs(logs: PipelineLog[]): PipelineLog[] {
   return logs.filter(l => l.type === 'score');
 }
 
-export function PipelineProgress() {
+export function PipelineProgress({ projectId }: { projectId?: string }) {
   const { pipelineRunning, pipelineStage, pipelineLogs, pipelineTargetScore, pipelineMaxRetries, stopPipeline } = useStoryStore();
   const logEndRef = useRef<HTMLDivElement>(null);
   const [elapsed, setElapsed] = useState(0);
+  const [usageInfo, setUsageInfo] = useState<{ totalTokens: number; totalCostUsd: number; callCount: number } | null>(null);
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -88,6 +91,21 @@ export function PipelineProgress() {
     }, 1000);
     return () => clearInterval(interval);
   }, [pipelineRunning, pipelineLogs]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    const fetchUsage = () => {
+      fetch(`/api/projects/${projectId}/usage`)
+        .then(r => r.json())
+        .then(data => setUsageInfo(data))
+        .catch(() => {});
+    };
+    fetchUsage();
+    if (pipelineRunning) {
+      const interval = setInterval(fetchUsage, 10000);
+      return () => clearInterval(interval);
+    }
+  }, [projectId, pipelineRunning, pipelineLogs.length]);
 
   if (pipelineStage === 'idle' && pipelineLogs.length === 0) return null;
 
@@ -120,6 +138,11 @@ export function PipelineProgress() {
           {lastScore && (
             <Badge variant="outline" className="text-[10px] bg-blue-500/20 text-blue-400">
               최근: {lastScore.message}
+            </Badge>
+          )}
+          {usageInfo && usageInfo.callCount > 0 && (
+            <Badge variant="outline" className="text-[10px] bg-amber-500/20 text-amber-400">
+              ${usageInfo.totalCostUsd.toFixed(4)} | {(usageInfo.totalTokens / 1000).toFixed(1)}k tok | {usageInfo.callCount}calls
             </Badge>
           )}
         </div>

@@ -70,7 +70,7 @@ export interface PipelineLog {
   type: 'info' | 'success' | 'warn' | 'error' | 'score';
 }
 
-export type PipelineStage = 'idle' | 'ai1_concept' | 'ai1_eval' | 'ai1_revise' | 'ai2_bible' | 'ai2_season' | 'ai2_eval' | 'ai2_revise' | 'ai2_scripts' | 'ai3_clips' | 'ai3_eval' | 'ai3_revise' | 'complete' | 'failed';
+export type PipelineStage = 'idle' | 'ai1_concept' | 'ai1_eval' | 'ai1_revise' | 'ai2_bible' | 'ai2_season' | 'ai2_eval' | 'ai2_revise' | 'ai2_scripts' | 'ai3_clips' | 'ai3_eval' | 'ai3_revise' | 'season_coherence' | 'complete' | 'failed';
 
 interface StoryStudioState {
   characters: StoryCharacter[];
@@ -95,6 +95,7 @@ interface StoryStudioState {
   evalStrategies: string[];
 
   pipelineRunning: boolean;
+  pipelineRunId: string | null;
   pipelineStage: PipelineStage;
   pipelineLogs: PipelineLog[];
   pipelineTargetScore: number;
@@ -131,7 +132,12 @@ interface StoryStudioState {
 
   runFullPipeline: (pid: string, inputData: Record<string, unknown>, targetScore?: number, maxRetries?: number, videoProvider?: string) => Promise<void>;
   stopPipeline: () => void;
-  optimizeStagePrompt: (pid: string, stage: string, generatorOutput: string, evaluation: EvalResult, plannerFeedback: string) => Promise<void>;
+  optimizeStagePrompt: (pid: string, stage: string, generatorOutput: string, evaluation: EvalResult, plannerFeedback: string) => Promise<boolean>;
+
+  regenerateSeasonWithFeedback: (pid: string) => Promise<void>;
+  regenerateScriptWithFeedback: (pid: string, epNum: number) => Promise<void>;
+  regenerateClipsWithFeedback: (pid: string, epNum: number) => Promise<void>;
+  runStagePipeline: (pid: string, stage: 'season' | 'script' | 'clips', epNum?: number, targetScore?: number, maxRetries?: number, videoProvider?: string) => Promise<void>;
 
   clearError: () => void;
 }
@@ -159,6 +165,7 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
   evalStrategies: [],
 
   pipelineRunning: false,
+  pipelineRunId: null,
   pipelineStage: 'idle',
   pipelineLogs: [],
   pipelineTargetScore: 4.0,
@@ -518,6 +525,24 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
 
       parts.push(`\n반드시 위 지시를 직접 해결해서 점수를 ${target} 이상으로 올려라.`);
       parts.push(`\n★ 절대 보호: AI 1 컨셉의 핵심 설정(세계관 규칙, 크리처 설정, 메인 캐릭터의 역할, 조연의 서사 기능, 사망 이벤트)은 변경하지 마라. 위 수정 지시는 이 핵심을 유지한 채 실행해라.`);
+
+      const lowestCriterion = ev.criteria?.slice().sort((a: any, b: any) => (a.score || 0) - (b.score || 0))[0];
+      if (lowestCriterion?.name === 'engine_variety') {
+        parts.push(`
+★ engine_variety 개선을 위한 참고 배치 안 (그대로 복사하지 말고 영감으로 활용):
+1화: power_reveal + discovery_mission
+2화: relationship_rupture + confrontation  
+3화: mystery_escalation + investigation
+4화: hidden_truth + infiltration
+5화: false_victory + rescue_extraction
+6화: irreversible_choice + defense_siege
+7화: grief_fallout + regrouping
+8화: betrayal_suspicion + chase_pursuit
+9화: strategy_lock_in + countdown_crisis
+10화: character_reveal + final_stand
+핵심: 인접 화의 narrativeEngine과 actionFormat이 모두 달라야 함.`);
+      }
+
       return parts.filter(Boolean).join('\n');
     };
 
@@ -528,8 +553,34 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
       return false;
     };
 
+    const pipelineApi = async (action: string, extra: Record<string, unknown> = {}) => {
+      try {
+        await fetch(`/api/projects/${pid}/pipeline`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action, ...extra }),
+        });
+      } catch { /* best-effort DB persistence */ }
+    };
+
+    let dbRunId: string | null = null;
+    try {
+      const res = await fetch(`/api/projects/${pid}/pipeline`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'create', pipelineType: 'story_full', targetScore, maxRetries, currentStage: 'ai1_concept', currentStageLabel: 'AI 1: 스토리 컨셉' }),
+      });
+      const run = await res.json();
+      dbRunId = run.id || null;
+    } catch { /* ignore */ }
+
+    const syncStage = (stage: string, label: string, pct: number) => {
+      if (dbRunId) pipelineApi('update_stage', { runId: dbRunId, stage, stageLabel: label, progressPct: pct });
+    };
+
     set({
       pipelineRunning: true,
+      pipelineRunId: dbRunId,
       pipelineStage: 'ai1_concept',
       pipelineLogs: [],
       pipelineAbort: false,
@@ -542,6 +593,7 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
       // ════════════ AI 1: Story Concept ════════════
       log('AI 1', '스토리 컨셉 생성 시작...', 'info');
       set({ pipelineStage: 'ai1_concept', generating: 'concept' });
+      syncStage('ai1_concept', 'AI 1: 컨셉 생성', 5);
       const conceptResult = await apiPost(`/api/projects/${pid}/story/concept`, { action: 'generate', ...inputData });
       set({ concept: conceptResult, generating: null });
       log('AI 1', `컨셉 v${conceptResult.version} 생성 완료`, 'success');
@@ -555,6 +607,7 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
         if (shouldAbort()) throw new Error('Pipeline stopped by user');
 
         set({ pipelineStage: 'ai1_eval' });
+        syncStage('ai1_eval', `AI 1: 컨셉 평가 (${attempt}/${maxRetries})`, 10 + attempt * 2);
         log('AI 1', `평가 ${attempt}/${maxRetries} 실행 중...`, 'info');
         const ev = await evaluate('concept');
         set({ evaluation: ev });
@@ -576,7 +629,7 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
         log('AI 1', `Planner 분석 중...`, 'info');
         const plannerResult = await callPlanner('concept', ev, attempt, ai1Strategies);
         ai1Strategies.push(plannerResult.decision || 'revise');
-        set({ plannerDecision: plannerResult });
+        set({ plannerDecision: plannerResult as PlannerDecision });
         log('AI 1', `Planner 결정: ${plannerResult.decision} | ${(plannerResult.replanReason || '').slice(0, 60)}`, 'info');
 
         if (plannerResult.decision === 'approve') {
@@ -596,8 +649,8 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
 
         const revisionBrief = buildPlannerRevisionBrief(ev, plannerResult, score, targetScore);
 
-        if (attempt === 1 || attempt % 2 === 0) {
-          log('AI 1', `프롬프트 최적화 중... (${attempt}회차)`, 'info');
+        if (attempt === 1) {
+          log('AI 1', `프롬프트 최적화 중...`, 'info');
           const optimizeSuccess = await get().optimizeStagePrompt(pid, 'ai1', get().concept?.approved_markdown || '', ev, revisionBrief);
           log('AI 1', optimizeSuccess ? '보충 규칙 업데이트 완료' : '보충 규칙 업데이트 실패', optimizeSuccess ? 'success' : 'warn');
         }
@@ -631,6 +684,7 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
       // ════════════ AI 2: Bible ════════════
       if (shouldAbort()) throw new Error('Pipeline stopped by user');
       set({ pipelineStage: 'ai2_bible', generating: 'bible' });
+      syncStage('ai2_bible', 'AI 2: Series Bible 생성', 25);
       log('AI 2', 'Series Bible 생성 중...', 'info');
       const bibleResult = await apiPost(`/api/projects/${pid}/story/bible`, {});
       set({ bible: bibleResult, generating: null });
@@ -639,6 +693,7 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
       // ════════════ AI 2: Season Plan ════════════
       if (shouldAbort()) throw new Error('Pipeline stopped by user');
       set({ pipelineStage: 'ai2_season', generating: 'season' });
+      syncStage('ai2_season', 'AI 2: 시즌 플랜 생성', 30);
       log('AI 2', '시즌 플랜 생성 중...', 'info');
       const seasonResult = await apiPost(`/api/projects/${pid}/story/season`);
       const episodeList: StoryEpisodeArc[] = Array.isArray(seasonResult) ? seasonResult : [];
@@ -691,8 +746,8 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
             ai2Brief = '이전 시즌 플랜을 전면 재설계하라. 이전 구조에 얽매이지 말고 완전히 다른 엔진 배치와 아크 구조를 시도해라.\n\n' + ai2Brief;
           }
 
-          if (attempt === 1 || attempt % 2 === 0) {
-            log('AI 2', `프롬프트 최적화 중... (${attempt}회차)`, 'info');
+          if (attempt === 1) {
+            log('AI 2', `프롬프트 최적화 중...`, 'info');
             const ok = await get().optimizeStagePrompt(pid, 'ai2', JSON.stringify(get().episodes.slice(0, 3)), ev, ai2Brief);
             log('AI 2', ok ? '보충 규칙 업데이트 완료' : '보충 규칙 업데이트 실패', ok ? 'success' : 'warn');
           }
@@ -717,11 +772,13 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
       if (shouldAbort()) throw new Error('Pipeline stopped by user');
       const epCount = get().episodes.length;
       set({ pipelineStage: 'ai2_scripts' });
+      syncStage('ai2_scripts', `AI 2: 에피소드 대본 생성 (0/${epCount})`, 45);
 
       for (let ep = 1; ep <= epCount; ep++) {
         if (shouldAbort()) throw new Error('Pipeline stopped by user');
 
         set({ currentEpisode: ep, generating: 'script' });
+        syncStage('ai2_scripts', `AI 2: 에피소드 대본 생성 (${ep}/${epCount})`, 45 + Math.round((ep / epCount) * 20));
         log('AI 2', `EP${ep}/${epCount} 대본 생성 중...`, 'info');
         let scriptResult;
         try {
@@ -767,8 +824,8 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
             scriptBrief = '이전 대본을 전면 재설계하라. 이전 장면 구성에 얽매이지 말고 완전히 다른 비트 구조를 시도해라.\n\n' + scriptBrief;
           }
 
-          if ([1, Math.ceil(epCount / 2), epCount].includes(ep) && (attempt === 1 || attempt % 2 === 0)) {
-            log('AI 2', `대본 프롬프트 최적화 중... (${attempt}회차)`, 'info');
+          if ([1, Math.ceil(epCount / 2), epCount].includes(ep) && attempt === 1) {
+            log('AI 2', `대본 프롬프트 최적화 중...`, 'info');
             const ok = await get().optimizeStagePrompt(pid, 'ai2', get().script?.markdown || '', ev, scriptBrief);
             log('AI 2', ok ? '보충 규칙 업데이트 완료' : '보충 규칙 업데이트 실패', ok ? 'success' : 'warn');
           }
@@ -786,11 +843,13 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
 
       // ════════════ AI 3: Clips per Episode ════════════
       set({ pipelineStage: 'ai3_clips' });
+      syncStage('ai3_clips', `AI 3: 클립 생성 (0/${epCount})`, 70);
 
       for (let ep = 1; ep <= epCount; ep++) {
         if (shouldAbort()) throw new Error('Pipeline stopped by user');
 
         set({ currentEpisode: ep, generating: 'clips' });
+        syncStage('ai3_clips', `AI 3: 클립 생성 (${ep}/${epCount})`, 70 + Math.round((ep / epCount) * 20));
         log('AI 3', `EP${ep}/${epCount} 클립 생성 중...`, 'info');
         let clipResult;
         try {
@@ -841,12 +900,19 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
           set({ pipelineStage: 'ai3_revise', generating: 'clips' });
           const plannerResult = await callPlanner('clips', ev, attempt, []);
           let clipBrief = buildPlannerRevisionBrief(ev, plannerResult, score, targetScore);
+          clipBrief = `★ 절대 보호 (수정하면서도 반드시 유지할 것):
+- 각 클립 duration은 4~14초. 15초 이상 절대 금지.
+- 타임코드는 반드시 연속: 이전 clip endTime = 다음 clip startTime
+- 클립 번호는 1부터 순차. 중간 누락/점프 금지.
+- 프롬프트 문장은 반드시 완결형. 중간에 잘린 문장 금지.
+
+` + clipBrief;
           if (plannerResult.decision === 'revise_full') {
             clipBrief = '이전 클립 설계를 전면 재설계하라. 이전 샷 구성에 얽매이지 말고 완전히 다른 프레이밍과 시퀀스를 시도해라.\n\n' + clipBrief;
           }
 
-          if ([1, Math.ceil(epCount / 2), epCount].includes(ep) && (attempt === 1 || attempt % 2 === 0)) {
-            log('AI 3', `클립 프롬프트 최적화 중... (${attempt}회차)`, 'info');
+          if ([1, Math.ceil(epCount / 2), epCount].includes(ep) && attempt === 1) {
+            log('AI 3', `클립 프롬프트 최적화 중...`, 'info');
             const ok = await get().optimizeStagePrompt(pid, 'ai3', JSON.stringify(get().clips.slice(0, 3)), ev, clipBrief);
             log('AI 3', ok ? '보충 규칙 업데이트 완료' : '보충 규칙 업데이트 실패', ok ? 'success' : 'warn');
           }
@@ -873,9 +939,37 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
         set({ pipelineStage: 'ai3_clips' });
       }
 
+      // ════════════ Season Coherence ════════════
+      set({ pipelineStage: 'season_coherence' });
+      syncStage('season_coherence', '시즌 일관성 평가', 95);
+      log('일관성', '시즌 전체 일관성 평가 시작...', 'info');
+      try {
+        const coherenceRes = await fetch(`/api/projects/${pid}/story/season-coherence`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ genreOverlay: inputData.genre_overlay }),
+        });
+        if (coherenceRes.ok) {
+          const coherence = await coherenceRes.json();
+          log('일관성', `시즌 일관성 점수: ${coherence.overallScore}/5 (캐릭터 아크: ${coherence.characterArcConsistency}, 플롯 해소: ${coherence.plotThreadResolution}, 페이싱: ${coherence.pacingBalance})`, 'score');
+          if (coherence.issues?.length > 0) {
+            const critical = coherence.issues.filter((i: any) => i.severity === 'critical');
+            if (critical.length > 0) {
+              log('일관성', `치명적 일관성 이슈 ${critical.length}건: ${critical.map((i: any) => `EP${i.episode}: ${i.issue}`).join(' | ')}`, 'warn');
+            }
+          }
+        }
+      } catch {
+        log('일관성', '시즌 일관성 평가 스킵 (오류)', 'warn');
+      }
+
       // ════════════ Complete ════════════
       log('완료', `전체 파이프라인 완료! AI1→AI2→AI3 (${epCount}화) 모두 생성 및 검증됨.`, 'success');
       set({ pipelineStage: 'complete', pipelineRunning: false, generating: null });
+      if (dbRunId) {
+        pipelineApi('update_stage', { runId: dbRunId, stage: 'complete', stageLabel: '완료', progressPct: 100 });
+        pipelineApi('update_status', { runId: dbRunId, status: 'completed' });
+      }
       try {
         await fetch(`/api/projects/${pid}/pipeline-logs`, {
           method: 'POST',
@@ -888,6 +982,10 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
       const msg = (err as Error).message;
       log('오류', msg, 'error');
       set({ pipelineStage: 'failed', pipelineRunning: false, generating: null, error: msg });
+      if (dbRunId) {
+        const status = msg.includes('stopped by user') ? 'aborted' : 'failed';
+        pipelineApi('update_status', { runId: dbRunId, status, errorMessage: msg });
+      }
       try {
         await fetch(`/api/projects/${pid}/pipeline-logs`, {
           method: 'POST',
@@ -895,6 +993,192 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
           body: JSON.stringify({ logs: get().pipelineLogs, stage: 'failed' }),
         });
       } catch { /* non-critical */ }
+    }
+  },
+
+  // ══════════════════════════════════════════════════════
+  // Feedback-Based Regeneration (단건)
+  // ══════════════════════════════════════════════════════
+  regenerateSeasonWithFeedback: async (pid: string) => {
+    const { evaluation, plannerDecision } = get();
+    if (!evaluation) return;
+    set({ generating: 'season', error: null });
+    const feedback = [
+      typeof evaluation.revisionBrief === 'string' ? evaluation.revisionBrief : JSON.stringify(evaluation.revisionBrief || ''),
+      ...(plannerDecision?.revisionTargets || []).map((rt: any) =>
+        `[${rt.priority}] ${typeof rt.target === 'string' ? rt.target : JSON.stringify(rt.target)}: ${typeof rt.problem === 'string' ? rt.problem : JSON.stringify(rt.problem)} → ${typeof rt.fixStrategy === 'string' ? rt.fixStrategy : JSON.stringify(rt.fixStrategy)}`
+      ),
+    ].filter(Boolean).join('\n');
+    try {
+      const res = await fetch(`/api/projects/${pid}/story/season`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ revisionFeedback: feedback }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      const data = await res.json();
+      set({ episodes: data, generating: null });
+      const evalRes = await fetch(`/api/projects/${pid}/story/evaluate`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskType: 'season' }),
+      });
+      if (evalRes.ok) set({ evaluation: await evalRes.json() });
+    } catch (err) { set({ error: (err as Error).message, generating: null }); }
+  },
+
+  regenerateScriptWithFeedback: async (pid: string, epNum: number) => {
+    const { evaluation, plannerDecision } = get();
+    if (!evaluation) return;
+    set({ generating: 'script', error: null });
+    const feedback = [
+      typeof evaluation.revisionBrief === 'string' ? evaluation.revisionBrief : JSON.stringify(evaluation.revisionBrief || ''),
+      ...(plannerDecision?.revisionTargets || []).map((rt: any) =>
+        `[${rt.priority}] ${typeof rt.problem === 'string' ? rt.problem : JSON.stringify(rt.problem)} → ${typeof rt.fixStrategy === 'string' ? rt.fixStrategy : JSON.stringify(rt.fixStrategy)}`
+      ),
+    ].filter(Boolean).join('\n');
+    try {
+      const res = await fetch(`/api/projects/${pid}/story/episodes/${epNum}/script`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ revisionFeedback: feedback }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      set({ script: await res.json(), generating: null });
+      const evalRes = await fetch(`/api/projects/${pid}/story/evaluate`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskType: 'script', episodeNumber: epNum }),
+      });
+      if (evalRes.ok) set({ evaluation: await evalRes.json() });
+    } catch (err) { set({ error: (err as Error).message, generating: null }); }
+  },
+
+  regenerateClipsWithFeedback: async (pid: string, epNum: number) => {
+    const { evaluation, plannerDecision } = get();
+    if (!evaluation) return;
+    set({ generating: 'clips', error: null });
+    const feedback = [
+      typeof evaluation.revisionBrief === 'string' ? evaluation.revisionBrief : JSON.stringify(evaluation.revisionBrief || ''),
+      ...(plannerDecision?.revisionTargets || []).map((rt: any) =>
+        `[${rt.priority}] ${typeof rt.problem === 'string' ? rt.problem : JSON.stringify(rt.problem)} → ${typeof rt.fixStrategy === 'string' ? rt.fixStrategy : JSON.stringify(rt.fixStrategy)}`
+      ),
+    ].filter(Boolean).join('\n');
+    try {
+      const res = await fetch(`/api/projects/${pid}/story/episodes/${epNum}/clips`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ density: 'cinematic_detail', videoProvider: 'seedance_2_0', revisionFeedback: feedback }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      const data = await res.json();
+      set({ clips: data.clips || [], frames: data.frames || [], timeline: data.timeline || '', generating: null });
+      const evalRes = await fetch(`/api/projects/${pid}/story/evaluate`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskType: 'clips', episodeNumber: epNum }),
+      });
+      if (evalRes.ok) set({ evaluation: await evalRes.json() });
+    } catch (err) { set({ error: (err as Error).message, generating: null }); }
+  },
+
+  // ══════════════════════════════════════════════════════
+  // Stage Mini-Pipeline
+  // ══════════════════════════════════════════════════════
+  runStagePipeline: async (
+    pid: string,
+    stage: 'season' | 'script' | 'clips',
+    epNum?: number,
+    targetScore: number = 4.0,
+    maxRetries: number = 5,
+    videoProvider: string = 'seedance_2_0',
+  ) => {
+    set({
+      pipelineRunning: true,
+      pipelineStage: stage === 'season' ? 'ai2_season' : stage === 'script' ? 'ai2_scripts' : 'ai3_clips',
+      pipelineLogs: [],
+      pipelineAbort: false,
+    });
+
+    const log = (stg: string, message: string, type: PipelineLog['type'] = 'info') => {
+      set(s => ({ pipelineLogs: [...s.pipelineLogs, { stage: stg, message, timestamp: Date.now(), type }] }));
+    };
+    const shouldAbort = () => get().pipelineAbort;
+    const aiLabel = stage === 'clips' ? 'AI 3' : 'AI 2';
+
+    try {
+      const hasData = stage === 'season' ? get().episodes.length > 0
+        : stage === 'script' ? !!get().script
+        : get().clips.length > 0;
+
+      if (!hasData) {
+        log(aiLabel, `${stage} 초기 생성 중...`, 'info');
+        if (stage === 'season') {
+          const r = await fetch(`/api/projects/${pid}/story/season`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+          const seasonData = await r.json();
+          set({ episodes: Array.isArray(seasonData) ? seasonData : [] });
+        } else if (stage === 'script' && epNum) {
+          const r = await fetch(`/api/projects/${pid}/story/episodes/${epNum}/script`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+          set({ script: await r.json() });
+        } else if (stage === 'clips' && epNum) {
+          const r = await fetch(`/api/projects/${pid}/story/episodes/${epNum}/clips`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ density: 'cinematic_detail', videoProvider }) });
+          const d = await r.json(); set({ clips: d.clips || [], frames: d.frames || [], timeline: d.timeline || '' });
+        }
+        log(aiLabel, `${stage} 초기 생성 완료`, 'success');
+      }
+
+      let bestScore = 0;
+      const taskType = stage === 'season' ? 'season' as const : stage === 'script' ? 'script' as const : 'clips' as const;
+
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        if (shouldAbort()) throw new Error('사용자 중지');
+
+        log(aiLabel, `평가 ${attempt}/${maxRetries}...`, 'info');
+        const evalRes = await fetch(`/api/projects/${pid}/story/evaluate`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ taskType, episodeNumber: epNum }),
+        });
+        const ev = await evalRes.json();
+        set({ evaluation: ev });
+        const score = ev.weightedScore || ev.overallScore || 0;
+        if (score > bestScore) {
+          bestScore = score;
+          log(aiLabel, `최고 점수 갱신! (${score.toFixed(1)})`, 'success');
+        }
+        log(aiLabel, `점수: ${score.toFixed(1)}/5 | 목표: ${targetScore} | 최고: ${bestScore.toFixed(1)}`, 'score');
+
+        if (score >= targetScore) { log(aiLabel, `통과! (${score.toFixed(1)} ≥ ${targetScore})`, 'success'); break; }
+        if (attempt >= maxRetries) { log(aiLabel, `최대 재시도 도달. 최고: ${bestScore.toFixed(1)}`, 'warn'); break; }
+
+        log(aiLabel, `Planner 분석 중...`, 'info');
+        const planRes = await fetch(`/api/projects/${pid}/story/plan`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'interpret', taskType, evaluation: ev, loop: attempt, previousStrategies: [] }),
+        });
+        const plan = await planRes.json();
+        log(aiLabel, `Planner 결정: ${plan.decision}`, 'info');
+        if (plan.decision === 'approve') { log(aiLabel, `Planner 승인!`, 'success'); break; }
+
+        const feedback = [
+          `★ 현재 점수: ${score.toFixed(1)}/5 | 목표: ${targetScore}`,
+          typeof ev.revisionBrief === 'string' ? ev.revisionBrief : '',
+          ...(plan.revisionTargets || []).map((rt: any) => `- [${rt.priority}] ${rt.problem} → ${rt.fixStrategy}`),
+        ].filter(Boolean).join('\n');
+
+        log(aiLabel, `재생성 중... attempt ${attempt}/${maxRetries}`, 'info');
+        if (stage === 'season') {
+          const r = await fetch(`/api/projects/${pid}/story/season`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revisionFeedback: feedback }) });
+          const seasonData = await r.json();
+          set({ episodes: Array.isArray(seasonData) ? seasonData : [] });
+        } else if (stage === 'script' && epNum) {
+          const r = await fetch(`/api/projects/${pid}/story/episodes/${epNum}/script`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revisionFeedback: feedback }) });
+          set({ script: await r.json() });
+        } else if (stage === 'clips' && epNum) {
+          const r = await fetch(`/api/projects/${pid}/story/episodes/${epNum}/clips`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ density: 'cinematic_detail', videoProvider, revisionFeedback: feedback }) });
+          const d = await r.json(); set({ clips: d.clips || [], frames: d.frames || [], timeline: d.timeline || '' });
+        }
+        log(aiLabel, `재생성 완료`, 'success');
+      }
+
+      set({ pipelineRunning: false, pipelineStage: 'complete' });
+      log(aiLabel, `${stage} 미니 파이프라인 완료! 최고: ${bestScore.toFixed(1)}`, 'success');
+    } catch (err) {
+      set({ pipelineRunning: false, pipelineStage: 'failed', error: (err as Error).message });
+      log('오류', (err as Error).message, 'error');
     }
   },
 }));

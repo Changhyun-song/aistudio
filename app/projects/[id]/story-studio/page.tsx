@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import type { StoryCharacter, GenreOverlay, GenreTag, StoryCentralAxis, VideoProvider } from '@/types';
+import type { StoryCharacter, GenreOverlay, GenreTag, StoryCentralAxis, VideoProvider, CharacterVisualPrompt } from '@/types';
 import { GENRE_TAGS, GENRE_PRESETS, DEFAULT_GENRE_OVERLAY, COMPOSITION_RULES, CENTRAL_AXES, VIDEO_PROVIDERS } from '@/types';
 import { EvaluationPanel } from '@/components/story/evaluation-panel';
 import { PipelineProgress } from '@/components/story/pipeline-progress';
@@ -75,7 +75,7 @@ export default function StoryStudioPage({ params }: { params: Promise<{ id: stri
       )}
 
       <main className="flex-1 max-w-7xl mx-auto px-4 py-6 w-full space-y-4">
-        <PipelineProgress />
+        <PipelineProgress projectId={projectId} />
         {tab === 'architect' && <ArchitectTab projectId={projectId} />}
         {tab === 'screenplay' && <ScreenplayTab projectId={projectId} />}
         {tab === 'designer' && <DesignerTab projectId={projectId} />}
@@ -109,8 +109,52 @@ function ArchitectTab({ projectId }: { projectId: string }) {
   const [userEdited, setUserEdited] = useState<Set<string>>(new Set());
   const [templateName, setTemplateName] = useState('');
   const [showTemplateSave, setShowTemplateSave] = useState(false);
-  const [pipelineTargetScore, setPipelineTargetScore] = useState(4.0);
+  const [pipelineTargetScore, setPipelineTargetScore] = useState(3.7);
   const [pipelineMaxRetries, setPipelineMaxRetries] = useState(10);
+  const [visualPrompts, setVisualPrompts] = useState<CharacterVisualPrompt[]>([]);
+  const [generatingVisuals, setGeneratingVisuals] = useState<string | null>(null);
+  const [expandedVisual, setExpandedVisual] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (characters.length > 0) {
+      fetch(`/api/projects/${projectId}/story/characters/visual-prompts`)
+        .then(r => r.json())
+        .then(data => { if (Array.isArray(data)) setVisualPrompts(data); })
+        .catch(() => {});
+    }
+  }, [characters.length, projectId]);
+
+  const handleGenerateAllVisuals = async () => {
+    setGeneratingVisuals('batch');
+    try {
+      const res = await fetch(`/api/projects/${projectId}/story/characters/visual-prompts`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'batch' }),
+      });
+      const data = await res.json();
+      if (data.prompts) setVisualPrompts(data.prompts);
+    } catch { /* ignore */ }
+    setGeneratingVisuals(null);
+  };
+
+  const handleGenerateSingleVisual = async (characterId: string) => {
+    setGeneratingVisuals(characterId);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/story/characters/visual-prompts`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'single', characterId }),
+      });
+      const data = await res.json();
+      if (data.id) {
+        setVisualPrompts(prev => {
+          const idx = prev.findIndex(p => p.character_id === characterId);
+          if (idx >= 0) return [...prev.slice(0, idx), data, ...prev.slice(idx + 1)];
+          return [...prev, data];
+        });
+      }
+    } catch { /* ignore */ }
+    setGeneratingVisuals(null);
+  };
 
   useEffect(() => {
     if (concept) {
@@ -506,6 +550,7 @@ function ArchitectTab({ projectId }: { projectId: string }) {
               >
                 <option value={3.0}>3.0 (보통)</option>
                 <option value={3.5}>3.5 (괜찮음)</option>
+                <option value={3.7}>3.7 (기본)</option>
                 <option value={4.0}>4.0 (좋음)</option>
                 <option value={4.5}>4.5 (매우 좋음)</option>
                 <option value={4.75}>4.75 (최고)</option>
@@ -695,6 +740,113 @@ function ArchitectTab({ projectId }: { projectId: string }) {
               <p className="text-sm">스토리 컨셉을 먼저 생성하면 등장인물이 자동으로 추출됩니다.</p>
             </div>
           )}
+
+          {/* MJ Visual Prompt Generation Section */}
+          {characters.length > 0 && (
+            <div className="space-y-4 mt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-semibold text-purple-400 flex items-center gap-2">
+                    <span className="w-2 h-2 bg-purple-500 rounded-full" />
+                    Midjourney 비주얼 프롬프트
+                  </h3>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    캐릭터 서사를 바탕으로 AI가 MJ 이미지 프롬프트를 자동 생성합니다
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  className="bg-purple-600 hover:bg-purple-700"
+                  onClick={handleGenerateAllVisuals}
+                  disabled={generatingVisuals !== null}
+                >
+                  {generatingVisuals === 'batch' ? 'AI 생성 중...' : visualPrompts.length > 0 ? '전체 재생성' : '전체 비주얼 프롬프트 생성'}
+                </Button>
+              </div>
+
+              {visualPrompts.length === 0 && generatingVisuals === null && (
+                <Card className="border-dashed border-purple-500/30">
+                  <CardContent className="py-8 text-center text-muted-foreground">
+                    <p>아직 비주얼 프롬프트가 없습니다.</p>
+                    <p className="text-xs mt-1">위 버튼을 눌러 캐릭터별 Midjourney 프롬프트를 자동 생성하세요.</p>
+                  </CardContent>
+                </Card>
+              )}
+
+              {generatingVisuals === 'batch' && (
+                <Card className="border-purple-500/30 animate-pulse">
+                  <CardContent className="py-6 text-center text-purple-400">
+                    모든 캐릭터의 비주얼 프롬프트를 AI가 생성 중입니다...
+                  </CardContent>
+                </Card>
+              )}
+
+              {visualPrompts.map(vp => {
+                const isVExpanded = expandedVisual === vp.character_id;
+                const char = characters.find(c => c.id === vp.character_id);
+                return (
+                  <Card key={vp.id} className={`border-purple-500/20 transition-all ${isVExpanded ? 'border-purple-500/50' : ''}`}>
+                    <CardHeader className="pb-2 cursor-pointer" onClick={() => setExpandedVisual(isVExpanded ? null : vp.character_id)}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Badge className="bg-purple-600 text-white shrink-0">{vp.character_name}</Badge>
+                          {vp.style_keywords && (
+                            <span className="text-xs text-muted-foreground truncate max-w-xs">{vp.style_keywords}</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <Button
+                            size="sm" variant="ghost"
+                            className="text-purple-400 text-xs"
+                            onClick={e => { e.stopPropagation(); handleGenerateSingleVisual(vp.character_id); }}
+                            disabled={generatingVisuals !== null}
+                          >
+                            {generatingVisuals === vp.character_id ? '재생성 중...' : '재생성'}
+                          </Button>
+                          <span className="text-xs text-muted-foreground">{isVExpanded ? '▲' : '▼'}</span>
+                        </div>
+                      </div>
+                      {!isVExpanded && vp.visual_brief && (
+                        <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{vp.visual_brief}</p>
+                      )}
+                    </CardHeader>
+                    {isVExpanded && (
+                      <CardContent className="space-y-4 pt-0">
+                        {vp.visual_brief && (
+                          <div className="p-3 rounded bg-purple-500/10 border border-purple-500/20">
+                            <span className="text-xs font-medium text-purple-400 block mb-1">외형 요약</span>
+                            <p className="text-sm">{vp.visual_brief}</p>
+                          </div>
+                        )}
+                        <PromptBlock label="Base Portrait" prompt={vp.mj_base_prompt} color="emerald" />
+                        <PromptBlock label="Emotional Portrait (3/4)" prompt={vp.mj_portrait_prompt} color="blue" />
+                        <PromptBlock label="Full Body Reference" prompt={vp.mj_full_body_prompt} color="cyan" />
+                        <PromptBlock label="Action / Ability Shot" prompt={vp.mj_action_prompt} color="orange" />
+                        <PromptBlock label="Expression Sheet (4-Grid)" prompt={vp.mj_expression_sheet} color="pink" />
+                        {vp.negative_prompts && (
+                          <div className="p-2 rounded bg-red-500/10 border border-red-500/20">
+                            <span className="text-xs font-medium text-red-400">Negative: </span>
+                            <span className="text-xs text-muted-foreground">{vp.negative_prompts}</span>
+                          </div>
+                        )}
+                        {char && (
+                          <div className="text-xs text-muted-foreground border-t border-border pt-3 space-y-1">
+                            <p>다음 단계: MJ에서 이미지 생성 → Character 탭에서 업로드 → 40-50 Shot 포즈 프롬프트 생성</p>
+                          </div>
+                        )}
+                      </CardContent>
+                    )}
+                  </Card>
+                );
+              })}
+
+              {characters.filter(c => !visualPrompts.find(vp => vp.character_id === c.id)).length > 0 && visualPrompts.length > 0 && (
+                <div className="text-xs text-muted-foreground">
+                  프롬프트 미생성 캐릭터: {characters.filter(c => !visualPrompts.find(vp => vp.character_id === c.id)).map(c => c.name).join(', ')}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -815,6 +967,42 @@ function CharacterCard({
 }
 
 // ══════════════════════════════════════════════════════════
+// PromptBlock — Copyable MJ prompt display
+// ══════════════════════════════════════════════════════════
+
+function PromptBlock({ label, prompt, color }: { label: string; prompt: string; color: string }) {
+  const [copied, setCopied] = useState(false);
+  if (!prompt) return null;
+
+  const colorMap: Record<string, string> = {
+    emerald: 'border-emerald-500/20 bg-emerald-500/5',
+    blue: 'border-blue-500/20 bg-blue-500/5',
+    cyan: 'border-cyan-500/20 bg-cyan-500/5',
+    orange: 'border-orange-500/20 bg-orange-500/5',
+    pink: 'border-pink-500/20 bg-pink-500/5',
+  };
+  const labelColor: Record<string, string> = {
+    emerald: 'text-emerald-400', blue: 'text-blue-400', cyan: 'text-cyan-400',
+    orange: 'text-orange-400', pink: 'text-pink-400',
+  };
+
+  return (
+    <div className={`p-3 rounded border ${colorMap[color] || 'border-zinc-500/20 bg-zinc-500/5'} group relative`}>
+      <div className="flex items-center justify-between mb-1.5">
+        <span className={`text-xs font-medium ${labelColor[color] || 'text-zinc-400'}`}>{label}</span>
+        <Button
+          size="sm" variant="ghost" className="h-6 px-2 text-[10px] opacity-0 group-hover:opacity-100 transition-opacity"
+          onClick={() => { navigator.clipboard.writeText(prompt); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
+        >
+          {copied ? 'Copied!' : 'Copy'}
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground font-mono leading-relaxed break-all select-all">{prompt}</p>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════
 // TagField — Reusable tag-style input
 // ══════════════════════════════════════════════════════════
 
@@ -865,11 +1053,13 @@ function TagField({ label, helpText, items, onUpdate, color, placeholder }: {
 // ══════════════════════════════════════════════════════════
 
 function ScreenplayTab({ projectId }: { projectId: string }) {
+  const store = useStoryStore();
   const {
     bible, episodes, currentEpisode, script,
     generating, generateBible, generateSeason, generateScript,
     fetchScript, setCurrentEpisode, concept, characters,
-  } = useStoryStore();
+    evaluation, pipelineRunning, pipelineStage,
+  } = store;
   const [subTab, setSubTab] = useState<'bible' | 'season' | 'script'>('bible');
   const [bibleForm, setBibleForm] = useState({
     title: '', genre: '', tone: '', world_rules: '', season_goal: '',
@@ -1007,9 +1197,33 @@ function ScreenplayTab({ projectId }: { projectId: string }) {
             })}
           </div>
 
-          {/* Season Evaluation */}
+          {/* Season Evaluation + Regeneration */}
           {episodes.length > 0 && (
-            <EvaluationPanel projectId={projectId} taskType="season" />
+            <>
+              <EvaluationPanel projectId={projectId} taskType="season" />
+              <div className="flex flex-wrap gap-3 mt-2">
+                {store.evaluation && (
+                  <Button
+                    onClick={() => store.regenerateSeasonWithFeedback(projectId)}
+                    disabled={store.generating === 'season' || store.pipelineRunning}
+                    className="bg-amber-600 hover:bg-amber-700"
+                  >
+                    {store.generating === 'season' ? '재생성 중...' : '피드백 반영 재생성'}
+                  </Button>
+                )}
+                <Button
+                  onClick={() => store.runStagePipeline(projectId, 'season', undefined, 3.7, 5)}
+                  disabled={store.pipelineRunning}
+                  variant="outline"
+                  className="border-amber-600 text-amber-400 hover:bg-amber-600/20"
+                >
+                  {store.pipelineRunning && store.pipelineStage === 'ai2_season' ? '개선 중...' : '시즌 플랜 자동 개선 (최대 5회)'}
+                </Button>
+              </div>
+              {store.pipelineRunning && store.pipelineStage === 'ai2_season' && (
+                <PipelineProgress projectId={projectId} />
+              )}
+            </>
           )}
         </div>
       )}
@@ -1043,8 +1257,30 @@ function ScreenplayTab({ projectId }: { projectId: string }) {
                 </div>
               )}
 
-              {/* Script Evaluation */}
+              {/* Script Evaluation + Regeneration */}
               <EvaluationPanel projectId={projectId} taskType="script" episodeNumber={currentEpisode} />
+              <div className="flex flex-wrap gap-3 mt-2">
+                {store.evaluation && (
+                  <Button
+                    onClick={() => store.regenerateScriptWithFeedback(projectId, currentEpisode)}
+                    disabled={store.generating === 'script' || store.pipelineRunning}
+                    className="bg-amber-600 hover:bg-amber-700"
+                  >
+                    {store.generating === 'script' ? '재생성 중...' : '피드백 반영 재생성'}
+                  </Button>
+                )}
+                <Button
+                  onClick={() => store.runStagePipeline(projectId, 'script', currentEpisode, 3.7, 5)}
+                  disabled={store.pipelineRunning}
+                  variant="outline"
+                  className="border-amber-600 text-amber-400 hover:bg-amber-600/20"
+                >
+                  {store.pipelineRunning && store.pipelineStage === 'ai2_scripts' ? '개선 중...' : `EP${currentEpisode} 대본 자동 개선 (최대 5회)`}
+                </Button>
+              </div>
+              {store.pipelineRunning && store.pipelineStage === 'ai2_scripts' && (
+                <PipelineProgress projectId={projectId} />
+              )}
             </div>
           )}
         </div>
@@ -1089,7 +1325,8 @@ function SceneCard({ scene }: { scene: Record<string, unknown> }) {
 // ══════════════════════════════════════════════════════════
 
 function DesignerTab({ projectId }: { projectId: string }) {
-  const { episodes, currentEpisode, setCurrentEpisode, script, clips, frames, timeline, generating, generateClipsAndFrames, fetchClipsAndFrames, fetchScript } = useStoryStore();
+  const store = useStoryStore();
+  const { episodes, currentEpisode, setCurrentEpisode, script, clips, frames, timeline, generating, generateClipsAndFrames, fetchClipsAndFrames, fetchScript, evaluation, pipelineRunning, pipelineStage } = store;
   const [density, setDensity] = useState<'balanced' | 'cinematic_detail'>('cinematic_detail');
   const [videoProvider, setVideoProvider] = useState<VideoProvider>('higgsfield');
   const [subTab, setSubTab] = useState<'timeline' | 'frames' | 'clips'>('clips');
@@ -1359,9 +1596,33 @@ function DesignerTab({ projectId }: { projectId: string }) {
             </div>
           )}
 
-          {/* Clips Evaluation */}
+          {/* Clips Evaluation + Regeneration */}
           {clips.length > 0 && (
-            <EvaluationPanel projectId={projectId} taskType="clips" episodeNumber={currentEpisode} />
+            <>
+              <EvaluationPanel projectId={projectId} taskType="clips" episodeNumber={currentEpisode} />
+              <div className="flex flex-wrap gap-3 mt-2">
+                {store.evaluation && (
+                  <Button
+                    onClick={() => store.regenerateClipsWithFeedback(projectId, currentEpisode)}
+                    disabled={store.generating === 'clips' || store.pipelineRunning}
+                    className="bg-amber-600 hover:bg-amber-700"
+                  >
+                    {store.generating === 'clips' ? '재생성 중...' : '피드백 반영 재생성'}
+                  </Button>
+                )}
+                <Button
+                  onClick={() => store.runStagePipeline(projectId, 'clips', currentEpisode, 3.7, 5, 'seedance_2_0')}
+                  disabled={store.pipelineRunning}
+                  variant="outline"
+                  className="border-amber-600 text-amber-400 hover:bg-amber-600/20"
+                >
+                  {store.pipelineRunning && store.pipelineStage === 'ai3_clips' ? '개선 중...' : `EP${currentEpisode} 클립 자동 개선 (최대 5회)`}
+                </Button>
+              </div>
+              {store.pipelineRunning && store.pipelineStage === 'ai3_clips' && (
+                <PipelineProgress projectId={projectId} />
+              )}
+            </>
           )}
         </>
       )}

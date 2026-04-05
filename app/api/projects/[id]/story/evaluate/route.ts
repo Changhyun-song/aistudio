@@ -48,9 +48,13 @@ export async function POST(
         if (!episodeNumber) return NextResponse.json({ error: 'episodeNumber 필요' }, { status: 400 });
         const clips = storyClipPacketRepo.listByEpisode(projectId, episodeNumber);
         const frames = storyBoundaryFrameRepo.listByEpisode(projectId, episodeNumber);
+        const parsedClips = clips.map(c => JSON.parse(c.packet_json));
+        const detectedProvider = parsedClips[0]?.provider || 'seedance_2_0';
         content = JSON.stringify({
-          clips: clips.map(c => JSON.parse(c.packet_json)),
-          frames: frames.map(f => ({ timecode: f.timecode, description: f.description, imagePrompt: f.image_prompt })),
+          provider: detectedProvider,
+          seedanceClipPackets: detectedProvider === 'seedance_2_0' ? parsedClips : [],
+          higgsfieldClipPackets: detectedProvider === 'higgsfield' ? parsedClips : [],
+          boundaryFrames: frames.map(f => ({ timecode: f.timecode, description: f.description, imagePrompt: f.image_prompt })),
         }, null, 2);
         break;
       }

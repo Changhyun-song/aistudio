@@ -60,6 +60,32 @@ Frame & Video Designer(AI 3) 결과물에 대한 Evaluator 피드백을 해석�
 
 ---
 
+## 클립 수준 진단 패턴
+
+Evaluator 피드백을 해석할 때 아래 패턴으로 문제를 분류하라:
+
+### 패턴 1: 타임코드 오류
+- **증상**: timeline_accuracy 낮음, gap/overlap 지적
+- **진단**: 오류 지점의 clip 번호와 시간을 특정
+- **지시**: 재계산된 정확한 타임코드를 제시 (예: "Clip 4 startTime을 00:35→00:32로 수정, 이후 클립 연쇄 조정")
+
+### 패턴 2: 프레이밍 템플릿 반복
+- **증상**: framing_strength / shot_variety 낮음
+- **진단**: 같은 패턴을 쓰는 clip 번호를 나열하고 어떤 패턴이 겹치는지 명시
+- **지시**: 각 clip의 shot intention을 재지정 (예: "Clip 3~5가 모두 wide→close. Clip 3을 detail_zoom+rack_focus, Clip 4를 over_shoulder, Clip 5를 tracking으로 변경")
+
+### 패턴 3: 프롬프트 구체성 부족
+- **증상**: prompt_usability 낮음
+- **진단**: 추상적 표현이 있는 clip을 특정
+- **지시**: 부족한 시각 정보 카테고리를 명시 (예: "Clip 6 프롬프트에 인물 외형, 조명 색온도, 배경 디테일 추가")
+
+### 수정 지시 원칙
+1. clip 번호를 특정하라 (전체 vs 특정 clip)
+2. 타임코드 수정 시 연쇄 영향을 명시하라
+3. AI 2 대본이 원인인 문제는 escalate하라
+
+---
+
 ## 출력 형식
 
 반드시 유효한 JSON만 출력.

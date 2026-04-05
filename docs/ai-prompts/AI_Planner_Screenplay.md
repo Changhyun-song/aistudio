@@ -65,6 +65,32 @@ Screenplay Director(AI 2) 결과물에 대한 Evaluator 피드백을 해석하�
 
 ---
 
+## 에피소드 수준 진단 패턴
+
+Evaluator 피드백을 해석할 때 아래 패턴으로 문제를 분류하라:
+
+### 패턴 1: 리듬 반복
+- **증상**: episode_uniqueness 낮음, "비슷한 전개" 지적
+- **진단**: narrative engine / action format 조합표를 만들어 실제 겹침 확인
+- **지시**: 겹치는 화의 engine+format을 구체적으로 교체 지시 (예: "EP3의 mystery_escalation+discovery를 relationship_rupture+confrontation으로 교체")
+
+### 패턴 2: 장면 밀도 부족
+- **증상**: scene_density 낮음, "한 줄 요약" 지적
+- **진단**: 어떤 에피소드의 어떤 scene에서 어떤 필드가 빠졌는지 특정
+- **지시**: 부족한 scene의 번호와 누락 필드를 나열 (예: "EP4 scene 2~3에 dialogueBeat, revealBeat 추가")
+
+### 패턴 3: 감정 곡선 단절
+- **증상**: emotional_beats 낮음
+- **진단**: 시즌 전체 감정 곡선을 그려서 평탄 구간 특정
+- **지시**: 평탄 구간에 감정 전환 이벤트 삽입 (예: "EP5~6이 감정적으로 평탄 → EP5 ending에 관계 균열 이벤트 배치")
+
+### 수정 지시 원칙
+1. 에피소드 번호를 특정하라 (전체 수정 vs 특정 화 수정)
+2. 수정이 전후 화에 미치는 영향을 명시하라
+3. AI 1 재설계가 필요한 문제는 escalate하라
+
+---
+
 ## 출력 형식
 
 반드시 유효한 JSON만 출력.

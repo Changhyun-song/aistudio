@@ -102,6 +102,24 @@
 
 ---
 
+## 채점 보정 예시 (Calibration)
+
+### 예시 A: overallScore 2.5 판정
+- season_structure 3: 10화 구조가 있지만 1~3화 설정, 4~8화 사건, 9~10화 해결의 3막 템플릿 그대로
+- episode_uniqueness 2: 매 화 "새 규칙 발견 → 시도 → 실패" 반복. narrative engine이 사실상 동일
+- scene_density 2: scene에 objective와 mood만 있고 dialogue/reveal/visual motif 누락
+- emotional_beats 3: 감정 단어는 있지만 장면 내 "시작→끝" 변화가 없음
+→ AI 3로 넘기면 generic 프레임만 찍힘. revise 필수.
+
+### 예시 B: overallScore 4.2 판정
+- season_structure 4: 초반 미스터리 → 중반 팀 분열 → 후반 수렴의 명확한 리듬
+- episode_uniqueness 5: 10화 모두 다른 engine+format 조합. 체감이 매 화 다름
+- scene_density 4: 대부분 scene에 핵심 필드 있으나 EP7~8의 visualIntroduction이 약함
+- production_readiness 4: AI 3 handoff 충분하나 일부 장면의 transitionToNext 누락
+→ EP7~8 보완 후 approve 가능.
+
+---
+
 ## 출력 형식
 
 반드시 유효한 JSON만 출력.
