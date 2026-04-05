@@ -462,6 +462,7 @@ export interface StoryEpisodeArc {
   key_characters: string;
   raw_json: string;
   created_at: string;
+  actionFormat?: string;
 }
 
 export interface StoryEpisodeScript {

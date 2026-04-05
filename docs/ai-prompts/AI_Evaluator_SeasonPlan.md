@@ -36,8 +36,11 @@
 - 메인 스토리선과 부 스토리선이 시즌 길이에 맞게 배분되는가
 
 ### 2. engine_variety (가중치: 3)
-- 에피소드마다 **narrative engine**(예: mystery escalation / relationship rupture / false victory / power reveal 등)이 구분되는가
-- **연속된 2화가 동일한 engine**으로 도는 경우 **감점**한다(의도적 미러링이 명시되지 않은 한)
+- 에피소드마다 **narrative engine**(테마적 동력)이 구분되는가
+- 에피소드마다 **action format**(체감 에피소드 유형: discovery_mission, chase_pursuit, infiltration, defense_siege, confrontation, rescue_extraction, countdown_crisis, investigation, regrouping, final_stand)이 구분되는가
+- 연속된 2화가 동일한 engine 또는 동일한 action format이면 **감점**
+- **같은 action format이 3회 이상 반복**되면 추가 감점 (특히 discovery_mission)
+- 라벨만 다르고 체감이 같으면("매 화 규칙 발견 → 전투") 라벨과 무관하게 낮은 점수
 
 ### 3. escalation_curve (가중치: 2)
 - 시즌 전체 **긴장·스테이크·감정적 압력**이 곡선으로 설계되어 있는가

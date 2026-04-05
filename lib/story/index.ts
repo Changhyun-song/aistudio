@@ -571,7 +571,12 @@ export async function generateSeasonPlan(
   const epCount = genreOverlay?.episode_count || 10;
   const epRuntime = genreOverlay?.runtime_per_episode || 5;
 
-  const userMsg = `## 시리즈 정보
+  const feedbackBlock = revisionFeedback
+    ? `## ★ 이전 평가 피드백 (반드시 반영할 것)\n${revisionFeedback.slice(0, 1500)}\n\n`
+    : '';
+  const bibleLimit = revisionFeedback ? 3000 : 6000;
+
+  const userMsg = `${feedbackBlock}## 시리즈 정보
 Title: ${bible.title}
 Genre: ${bible.genre}
 Tone: ${bible.tone}
@@ -579,7 +584,7 @@ Tone: ${bible.tone}
 ${overlayBlock}
 
 ## Series Bible
-${bibleStr.slice(0, 6000)}
+${bibleStr.slice(0, bibleLimit)}
 
 ${concept ? `## AI 1 승인된 스토리 컨셉 (전문)\n${concept}\n` : ''}
 
@@ -588,13 +593,16 @@ ${concept ? `## AI 1 승인된 스토리 컨셉 (전문)\n${concept}\n` : ''}
 이 시리즈를 **${epCount}부작 x ${epRuntime}분** 구조로 분할해줘.
 
 ### 필수 규칙:
-1. 매 화마다 반드시 아래 narrative engine 중 하나를 중심 동력으로 배치:
-   character_reveal / relationship_rupture / mystery_escalation / false_victory / grief_fallout / hidden_truth / betrayal_suspicion / power_reveal / strategy_lock_in / irreversible_choice
-2. **연속 2화가 같은 engine을 쓰면 안 된다**
-3. 제목은 generic 금지 — 그 화의 핵심 이미지/장치를 반영하는 구체적 제목
-4. 매 화에 최소 1명의 조연이 **주인공의 행동/판단에 직접 영향**을 주는 역할을 해야 한다
-5. beginning/middle/climax는 각각 **최소 3문장**, 구체적 비주얼/행동 포함
-6. summary는 **최소 5문장**
+1. 매 화마다 반드시 narrative engine 1개 + action format 1개를 배정
+   - narrative engine: character_reveal / relationship_rupture / mystery_escalation / false_victory / grief_fallout / hidden_truth / betrayal_suspicion / power_reveal / strategy_lock_in / irreversible_choice
+   - action format: discovery_mission / chase_pursuit / infiltration / defense_siege / confrontation / rescue_extraction / countdown_crisis / investigation / regrouping / final_stand
+2. **연속 2화가 같은 narrative engine을 쓰면 안 된다**
+3. **연속 2화가 같은 action format을 쓰면 안 된다**
+4. 10화 기준 action format은 **최소 6종류** 사용. discovery_mission은 **최대 2회**
+5. 제목은 generic 금지 — 그 화의 핵심 이미지/장치를 반영하는 구체적 제목
+6. 매 화에 최소 1명의 조연이 **주인공의 행동/판단에 직접 영향**을 주는 역할을 해야 한다
+7. beginning/middle/climax는 각각 **최소 3문장**, 각각 "목표 1개 + 방해 1개 + 결과 1개" 포함
+8. summary는 **최소 5문장**
 
 반드시 아래 JSON 배열 형식으로만 출력. 다른 텍스트 없이.
 
@@ -604,14 +612,15 @@ ${concept ? `## AI 1 승인된 스토리 컨셉 (전문)\n${concept}\n` : ''}
     "episodeNumber": 1,
     "title": "구체적이고 이미지가 있는 제목",
     "narrativeEngine": "character_reveal",
+    "actionFormat": "discovery_mission",
     "purpose": "이 화가 시즌 전체에서 하는 역할",
     "centralCharacter": "이 화의 중심 캐릭터",
     "supportingCastRole": "이 화에서 조연이 하는 구체적 역할",
     "summary": "줄거리 요약 (5문장+)",
-    "beginning": "도입 (3문장+, 구체적 비주얼)",
-    "middle": "중반 (3문장+, 갈등 전개와 감정 변화)",
-    "climax": "클라이맥스 (3문장+, 구체적 장면)",
-    "endingHook": "다음 회 연결 (구체적 시각적 장면)",
+    "beginning": "도입: 목표+방해+결과 포함 (3문장+)",
+    "middle": "중반: 목표+방해+결과 포함 (3문장+)",
+    "climax": "클라이맥스: 목표+방해+결과 포함 (3문장+)",
+    "endingHook": "다음 화 연결: 누가+무엇을+왜위험 (1~2문장)",
     "keyCharacters": ["캐릭터1", "캐릭터2"],
     "emotionalProgression": "감정선: A → B → C",
     "revealOrConflict": "이 화에서 드러나는 정보/갈등"
@@ -619,7 +628,6 @@ ${concept ? `## AI 1 승인된 스토리 컨셉 (전문)\n${concept}\n` : ''}
 ]
 \`\`\`
 
-${revisionFeedback ? `\n## ★ 이전 평가 피드백 (반드시 반영할 것)\n${revisionFeedback}\n` : ''}
 ${epCount}개의 에피소드를 출력. 한국어로 작성.`;
 
   const provider = getProvider();
@@ -629,7 +637,13 @@ ${epCount}개의 에피소드를 출력. 한국어로 작성.`;
     const raw = await provider.chat(sysPrompt, userMsg, { maxTokens: 16000, model: MODEL_GENERATOR });
     try {
       const parsed = JSON.parse(extractJsonBlock(raw));
-      return Array.isArray(parsed) ? parsed : [];
+      const episodes = Array.isArray(parsed) ? parsed : [];
+      if (episodes.length < epCount) {
+        console.warn(`[SeasonPlan] retry ${retry}: got ${episodes.length} episodes, expected ${epCount}`);
+        if (retry === 2) return episodes;
+        continue;
+      }
+      return episodes;
     } catch {
       if (retry === 2) {
         throw new Error(`시즌 플랜 JSON 파싱 실패 (3회 재시도 후): ${raw.slice(0, 200)}...`);
@@ -820,6 +834,20 @@ export interface FrameVideoOutput {
   clipPackets: ClipPacketOutput[];
 }
 
+function compactScenes(scenes: SceneOutput[]): string {
+  return scenes.map((s, i) => `### Scene ${i + 1}: ${s.title || ''}
+- 장소: ${s.location || ''}
+- 시간: ${s.timeRange || ''}
+- 캐릭터: ${(s.characters || []).join(', ')}
+- 목표: ${s.sceneObjective || ''}
+- 첫 화면: ${s.visualIntroduction || ''}
+- 감정: ${s.emotionalBeat || ''}
+- 갈등: ${s.conflictBeat || ''}
+- 대사: ${s.dialogueBeat || ''}
+- 모티프: ${s.visualMotif || ''}
+- 전환: ${s.transitionToNext || ''}`).join('\n\n');
+}
+
 function buildHiggsfieldUserMsg(
   bible: StorySeriesBible, arc: StoryEpisodeArc,
   script: { scenes: SceneOutput[] }, characters: StoryCharacter[],
@@ -849,7 +877,7 @@ Frame-chain 방식으로 생성해야 합니다.
 ${overlayBlock}
 
 ## 장면 구성
-${JSON.stringify(script.scenes, null, 2)}
+${compactScenes(script.scenes)}
 
 ## 등장인물
 ${charBlock}
@@ -930,7 +958,7 @@ multi_shot 클립은 한 클립 안에서 여러 shot beat(intro/reveal/reaction
 ${overlayBlock}
 
 ## 장면 구성
-${JSON.stringify(script.scenes, null, 2)}
+${compactScenes(script.scenes)}
 
 ## 등장인물
 ${charBlock}
@@ -1009,6 +1037,91 @@ ${locations.map((l, i) => `${i + 1}. ${l}`).join('\n')}
 - **연속 타임코드 필수 — 전체 합 = ${totalSec}초 (±5초)**`;
 }
 
+function buildSceneUserMsg(
+  bible: StorySeriesBible, arc: StoryEpisodeArc,
+  scene: SceneOutput, sceneIndex: number, totalScenes: number,
+  characters: StoryCharacter[], density: string,
+  genreOverlay: GenreOverlay | undefined, videoProvider: VideoProvider,
+  timeOffset: string, allocatedSec: number,
+): string {
+  let bibleJson: Record<string, unknown>;
+  try { bibleJson = JSON.parse(bible.raw_json); } catch { bibleJson = {}; }
+
+  const charBlock = characters
+    .map((c) => `- ${c.name}: ${c.traits}, 시그니처 ${c.signature_item}, 컬러 ${c.signature_color}`)
+    .join('\n');
+
+  const providerLabel = videoProvider === 'seedance_2_0' ? 'seedance_2_0' : 'higgsfield';
+  const clipRange = videoProvider === 'seedance_2_0' ? '4~15초' : '4~20초';
+
+  const sceneBlock = `### Scene ${sceneIndex + 1}/${totalScenes}: ${scene.title || ''}
+- 장소: ${scene.location || ''}
+- 시간: ${scene.timeRange || ''}
+- 캐릭터: ${(scene.characters || []).join(', ')}
+- 목표: ${scene.sceneObjective || ''}
+- 첫 화면: ${scene.visualIntroduction || ''}
+- 감정: ${scene.emotionalBeat || ''}
+- 갈등: ${scene.conflictBeat || ''}
+- 대사: ${scene.dialogueBeat || ''}
+- 공개: ${scene.revealBeat || ''}
+- 모티프: ${scene.visualMotif || ''}
+- 전환: ${scene.transitionToNext || ''}`;
+
+  const seedanceExtra = videoProvider === 'seedance_2_0'
+    ? `\n- 각 클립마다 clipMode(single_beat/multi_shot) 판단 필수
+- multi_shot: shotSequenceCount=2~5, beat별 startSec/endSec 배분
+- seedancePrompt는 shot/camera/reveal/pacing progression을 반영한 영어 시네마틱 서술`
+    : `\n- boundary frame(이미지) 개수 = clip 개수 + 1 (frame-chain)`;
+
+  const outputHint = videoProvider === 'seedance_2_0'
+    ? `"seedanceClipPackets": [{ "clipNumber": N, "startTime": "MM:SS", "endTime": "MM:SS", "totalDurationSec": X, "clipMode": "single_beat|multi_shot", "shotSequenceCount": N, "shotSequence": [...], "shotProgression": "...", "cameraProgression": "...", "revealProgression": "...", "pacingProgression": "...", "sceneObjective": "...", "seedancePrompt": "English prompt" }]`
+    : `"higgsfieldClipPackets": [{ "clipNumber": N, "startTime": "MM:SS", "endTime": "MM:SS", "durationSec": X, "startFrameId": "image_NNN", "endFrameId": "image_NNN", "shotType": "...", "cameraMovement": "...", "sceneObjective": "...", "videoPrompt": "English prompt" }],
+"boundaryFrames": [{ "frameId": "image_NNN", "timecode": "MM:SS", "description": "...", "imagePrompt": "English prompt" }]`;
+
+  return `## Provider: ${providerLabel}
+## 에피소드 정보
+시리즈: ${bibleJson.logline || bible.title}
+장르: ${bible.genre} | 톤: ${bible.tone}
+에피소드 ${arc.episode_number}: "${arc.title}"
+
+## 이 장면 정보
+${sceneBlock}
+
+## 등장인물
+${charBlock}
+
+## 설정
+- Shot density: ${density}
+- 이 장면 시작 타임코드: ${timeOffset}
+- 이 장면 할당 시간: ${allocatedSec}초
+- 클립 길이: ${clipRange}
+- 이 장면에서 3~6개 클립 생성${seedanceExtra}
+
+## ★ 필수 규칙
+- 연속 타임코드: 이전 clip endTime = 다음 clip startTime (정확히)
+- 시작 타임코드: ${timeOffset}
+- 이 장면 클립 duration 합 = ${allocatedSec}초 (±3초)
+- MM:SS 형식
+- Shot Intention First: 매 클립마다 shotIntention을 먼저 결정 (character_intro / threat_reveal / reaction_beat / scale_reveal / dialogue_beat / action_beat / mystery_clue)
+- AI 2 scene beat 기반 설계. 임의 발명 금지.
+- wide→medium→close-up 범용 패턴 반복 금지.
+- clipNumber는 ${sceneIndex > 0 ? '이전 장면 마지막 번호 다음부터' : '1부터'} 시작
+
+아래 JSON 형식으로만 출력. 다른 텍스트 없이.
+{ ${outputHint} }`;
+}
+
+function parseTimeToSec(t: string): number {
+  const parts = t.split(':').map(Number);
+  return (parts[0] || 0) * 60 + (parts[1] || 0);
+}
+
+function secToTime(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
 export async function generateFrameAndVideoPackets(
   bible: StorySeriesBible,
   arc: StoryEpisodeArc,
@@ -1020,28 +1133,103 @@ export async function generateFrameAndVideoPackets(
   projectId?: string,
   revisionFeedback?: string,
 ): Promise<FrameVideoOutputV2> {
-  const feedbackBlock = revisionFeedback ? `\n\n## ★ 이전 평가 피드백 (반드시 반영할 것)\n${revisionFeedback}` : '';
-  const baseMsg = videoProvider === 'seedance_2_0'
-    ? buildSeedanceUserMsg(bible, arc, script, characters, density, genreOverlay)
-    : buildHiggsfieldUserMsg(bible, arc, script, characters, density, genreOverlay);
-  const userMsg = baseMsg + feedbackBlock;
-
   const provider = getProvider();
   const supplement = projectId ? getSupplementForStage(projectId, 'ai3') : '';
-  const raw = await provider.chat(getFrameVideoPromptDesignerPrompt(supplement), userMsg, { maxTokens: 16000, model: MODEL_GENERATOR });
-  try {
-    const parsed = JSON.parse(extractJsonBlock(raw));
-    return {
-      provider: videoProvider,
-      header: parsed.header || { title: arc.title, episodeNumber: arc.episode_number, duration: `${genreOverlay?.runtime_per_episode || 5}:00` },
-      timeline: parsed.timeline || '',
-      boundaryFrames: parsed.boundaryFrames || [],
-      higgsfieldClipPackets: parsed.higgsfieldClipPackets || parsed.clipPackets || [],
-      seedanceClipPackets: parsed.seedanceClipPackets || [],
-    };
-  } catch {
-    throw new Error(`프레임/비디오 패킷 JSON 파싱 실패: ${raw.slice(0, 200)}...`);
+  const sysPrompt = getFrameVideoPromptDesignerPrompt(supplement);
+
+  const scenes = script.scenes || [];
+  if (scenes.length === 0) {
+    throw new Error('장면 데이터가 없습니다');
   }
+
+  const totalSec = (genreOverlay?.runtime_per_episode || 5) * 60;
+  const secPerScene = Math.floor(totalSec / scenes.length);
+
+  const allBoundaryFrames: any[] = [];
+  const allHiggsfieldClips: any[] = [];
+  const allSeedanceClips: any[] = [];
+  const timelineParts: string[] = [];
+
+  let currentClipNum = 1;
+  let currentTimeSec = 0;
+  let currentFrameNum = 1;
+
+  for (let si = 0; si < scenes.length; si++) {
+    const scene = scenes[si];
+    const isLast = si === scenes.length - 1;
+    const allocSec = isLast ? (totalSec - currentTimeSec) : secPerScene;
+    const timeOffset = secToTime(currentTimeSec);
+
+    let sceneMsg = buildSceneUserMsg(
+      bible, arc, scene, si, scenes.length, characters, density,
+      genreOverlay, videoProvider, timeOffset, allocSec,
+    );
+    if (revisionFeedback && si === 0) {
+      sceneMsg += `\n\n## ★ 이전 평가 피드백 (반드시 반영할 것)\n${revisionFeedback.slice(0, 800)}`;
+    }
+
+    let parsed: any = null;
+    for (let retry = 0; retry < 3; retry++) {
+      try {
+        const raw = await provider.chat(sysPrompt, sceneMsg, { maxTokens: 8000, model: MODEL_GENERATOR });
+        parsed = JSON.parse(extractJsonBlock(raw));
+        break;
+      } catch (err) {
+        console.warn(`[AI 3] Scene ${si + 1} retry ${retry + 1}/3 실패: ${(err as Error).message?.slice(0, 80)}`);
+        if (retry === 2) {
+          console.error(`[AI 3] Scene ${si + 1} 생성 포기, 스킵`);
+        }
+      }
+    }
+
+    if (!parsed) {
+      currentTimeSec += allocSec;
+      continue;
+    }
+
+    if (parsed.timeline) timelineParts.push(parsed.timeline);
+
+    // Renumber boundary frames
+    const frames = parsed.boundaryFrames || [];
+    const frameIdMap: Record<string, string> = {};
+    for (const f of frames) {
+      const newId = `image_${String(currentFrameNum).padStart(3, '0')}`;
+      frameIdMap[f.frameId] = newId;
+      f.frameId = newId;
+      currentFrameNum++;
+      allBoundaryFrames.push(f);
+    }
+
+    // Renumber and re-timecode higgsfield clips
+    const hClips = parsed.higgsfieldClipPackets || parsed.clipPackets || [];
+    for (const c of hClips) {
+      c.clipNumber = currentClipNum++;
+      if (c.startFrameId && frameIdMap[c.startFrameId]) c.startFrameId = frameIdMap[c.startFrameId];
+      if (c.endFrameId && frameIdMap[c.endFrameId]) c.endFrameId = frameIdMap[c.endFrameId];
+      allHiggsfieldClips.push(c);
+    }
+
+    // Renumber seedance clips
+    const sClips = parsed.seedanceClipPackets || [];
+    for (const c of sClips) {
+      c.clipNumber = currentClipNum++;
+      allSeedanceClips.push(c);
+    }
+
+    // Advance time based on actual clip durations
+    const sceneDurations = [...hClips.map((c: any) => c.durationSec || 0), ...sClips.map((c: any) => c.totalDurationSec || 0)];
+    const actualSceneSec = sceneDurations.reduce((a: number, b: number) => a + b, 0);
+    currentTimeSec += actualSceneSec > 0 ? actualSceneSec : allocSec;
+  }
+
+  return {
+    provider: videoProvider,
+    header: { title: arc.title, episodeNumber: arc.episode_number, duration: `${genreOverlay?.runtime_per_episode || 5}:00` },
+    timeline: timelineParts.join('\n\n'),
+    boundaryFrames: allBoundaryFrames,
+    higgsfieldClipPackets: allHiggsfieldClips,
+    seedanceClipPackets: allSeedanceClips,
+  };
 }
 
 // ══════════════════════════════════════════════════════
@@ -1135,6 +1323,61 @@ function normalizeScoresTo5(result: EvalResult): void {
   }
 }
 
+function summarizeClipsForEval(content: string): string {
+  try {
+    const data = JSON.parse(content);
+    const clips = data.seedanceClipPackets || data.higgsfieldClipPackets || data.clips || [];
+    const frames = data.boundaryFrames || data.frames || [];
+    if (!Array.isArray(clips) || clips.length === 0) return sampleContentForEvaluation(content);
+
+    const multiShot = clips.filter((c: any) => c.clipMode === 'multi_shot' || (c.shotSequenceCount && c.shotSequenceCount > 1)).length;
+    const singleBeat = clips.length - multiShot;
+    const firstTime = clips[0]?.startTime || '00:00';
+    const lastTime = clips[clips.length - 1]?.endTime || '??:??';
+    const totalDur = clips.reduce((sum: number, c: any) => sum + (c.totalDurationSec || c.durationSec || 0), 0);
+
+    const lines = [
+      `## 클립 통계 요약`,
+      `- 총 클립 수: ${clips.length}`,
+      `- 경계 프레임 수: ${frames.length}`,
+      `- 타임코드 범위: ${firstTime} → ${lastTime} (총 ${totalDur}초)`,
+      `- multi_shot: ${multiShot}개 / single_beat: ${singleBeat}개`,
+      `- provider: ${data.provider || 'unknown'}`,
+      ``,
+      `## 클립별 한 줄 요약`,
+    ];
+
+    for (const c of clips) {
+      const num = c.clipNumber || '?';
+      const start = c.startTime || '';
+      const end = c.endTime || '';
+      const dur = c.totalDurationSec || c.durationSec || '?';
+      const mode = c.clipMode || (c.startFrameId ? 'frame_chain' : 'single_beat');
+      const beats = c.shotSequenceCount || 1;
+      const intent = c.shotIntention || c.shotType || '';
+      const obj = (c.sceneObjective || '').slice(0, 40);
+      lines.push(`- #${num} [${start}→${end}] ${dur}s ${mode}(${beats}beats) ${intent} | ${obj}`);
+    }
+
+    if (data.timeline) {
+      lines.push('', '## 타임라인 서술', data.timeline.slice(0, 2000));
+    }
+
+    return lines.join('\n');
+  } catch {
+    return sampleContentForEvaluation(content);
+  }
+}
+
+function stripSelfEvaluation(text: string): string {
+  const patterns = [/##\s*16\.\s*자가\s*품질\s*검사/i, /###\s*16\.\s*자가\s*품질\s*검사/i];
+  for (const pat of patterns) {
+    const match = text.search(pat);
+    if (match !== -1) return text.slice(0, match).trimEnd();
+  }
+  return text;
+}
+
 export async function evaluateOutput(
   taskType: EvalTaskType,
   content: string,
@@ -1142,13 +1385,20 @@ export async function evaluateOutput(
 ): Promise<EvalResult> {
   const overlayBlock = formatOverlayBlock(genreOverlay);
   const promptTaskType = EVAL_TASK_MAP[taskType];
+  const cleanContent = stripSelfEvaluation(content);
+
+  const seasonContext = taskType === 'season'
+    ? '\n참고: AI 1 컨셉에서 설계된 조연은 스토리 구조상 필수이다. 조연 수 자체를 감점 기준으로 삼지 마라. 조연의 기능 분리와 활용도를 평가해라.\n'
+    : '';
+
+  const evalContent = taskType === 'clips' ? summarizeClipsForEval(cleanContent) : sampleContentForEvaluation(cleanContent);
 
   const userMsg = `## 평가 태스크: ${promptTaskType}
-
+${seasonContext}
 ${overlayBlock}
 
 ## 평가 대상 콘텐츠
-${sampleContentForEvaluation(content)}
+${evalContent}
 
 ## 규칙
 - 3-Lens 평가 (Elite Critic / Mainstream Audience / Production)

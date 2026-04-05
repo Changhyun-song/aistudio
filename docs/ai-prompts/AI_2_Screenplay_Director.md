@@ -38,7 +38,8 @@ bible의 각 섹션은 역할이 명확히 분리되어야 한다. 중복 설명
 
 ## ★ 시즌 플래너 강화
 
-각 화는 **아래 narrative engine 중 하나를 중심 동력**으로 반드시 가져야 한다:
+### Narrative Engine (테마적 동력)
+각 화는 아래 중 하나를 **테마적 중심 동력**으로 반드시 가진다:
 
 | Engine | 설명 |
 |---|---|
@@ -53,31 +54,64 @@ bible의 각 섹션은 역할이 명확히 분리되어야 한다. 중복 설명
 | strategy_lock_in | 팀이 전략을 확정하는 전환점 |
 | irreversible_choice | 되돌릴 수 없는 선택 |
 
-규칙:
-- 연속 2화가 같은 engine을 쓰면 안 됨
-- 매 화 제목은 **generic 금지** (예: "시작", "결전" → 금지)
-- 제목은 그 화의 핵심 이미지/장치를 반영
+### Action Format (물리적 형식)
+각 화는 아래 중 하나를 **물리적 에피소드 형식**으로 반드시 가진다.
+이것은 "이 화를 관객이 어떤 종류의 에피소드로 체감하는가"를 결정한다.
 
-### 시즌 플래너 출력 구조 (각 화)
+| Format | 설명 | 체감 |
+|---|---|---|
+| discovery_mission | 새로운 규칙/장소/정보를 처음 발견 | "뭔가 알아냈다" |
+| chase_pursuit | 추격하거나 추격당함 | "빨리 잡아야/도망쳐야 한다" |
+| infiltration | 잠입, 은밀한 접근, 비밀 작전 | "들키면 끝이다" |
+| defense_siege | 장소/인물을 지키며 버팀 | "여기서 버텨야 한다" |
+| confrontation | 정면 대치, 공개 충돌, 대결 | "이제 숨길 수 없다" |
+| rescue_extraction | 누군가를 구출/탈출 | "데려와야 한다" |
+| countdown_crisis | 시간 제한 하의 위기 | "시간이 없다" |
+| investigation | 단서 추적, 추리, 분석 | "이 조각들은 무슨 의미인가" |
+| regrouping | 패배/상실 후 재정비 | "다시 시작해야 한다" |
+| final_stand | 모든 것을 걸고 최종 대응 | "이번이 마지막이다" |
 
-```json
-{
-  "episodeNumber": 1,
-  "title": "구체적이고 이미지가 있는 제목",
-  "narrativeEngine": "character_reveal",
-  "purpose": "이 화가 시즌 전체에서 하는 역할",
-  "centralCharacter": "이 화의 중심 캐릭터",
-  "supportingCastRole": "이 화에서 조연이 하는 구체적 역할",
-  "summary": "줄거리 요약 (5문장+)",
-  "beginning": "도입 (3문장+, 구체적 비주얼 포함)",
-  "middle": "중반 (3문장+, 갈등 전개와 감정 변화)",
-  "climax": "클라이맥스 (3문장+, 구체적 장면)",
-  "endingHook": "다음 회 연결 (구체적 시각적 장면)",
-  "keyCharacters": ["캐릭터1", "캐릭터2"],
-  "emotionalProgression": "감정선: A → B → C",
-  "revealOrConflict": "이 화에서 드러나는 정보/갈등"
-}
-```
+### 이중 엔진 규칙 (필수)
+1. 매 화에 narrative engine 1개 + action format 1개를 **반드시 배정**
+2. **연속 2화가 같은 narrative engine을 쓰면 안 됨**
+3. **연속 2화가 같은 action format을 쓰면 안 됨**
+4. 10화 시즌 기준, action format은 **최소 6종류** 사용
+5. discovery_mission이 3회 이상 반복되면 실패 — 발견은 최대 2회
+6. 매 화 제목은 **generic 금지** — 그 화의 핵심 이미지/장치를 반영
+
+### 이중 엔진 등급별 예시
+
+**2점 (실패):**
+1화: power_reveal + discovery_mission (규칙 발견)
+2화: mystery_escalation + discovery_mission (또 규칙 발견)
+3화: character_reveal + discovery_mission (또 또 규칙 발견)
+→ 라벨은 다르지만 관객 체감은 "매 화 뭔가 발견하는 전개"로 동일
+
+**4.5점 (뛰어남):**
+1화: power_reveal + discovery_mission (학교 출석부에서 첫 규칙 발견)
+2화: relationship_rupture + confrontation (규칙 해석 차이로 팀 내 공개 충돌)
+3화: mystery_escalation + investigation (사라진 학생의 기록을 역추적)
+4화: hidden_truth + infiltration (방송실에 몰래 잠입해 로그 확보)
+5화: false_victory + rescue_extraction (구출 성공했지만 대가 발생)
+→ 매 화 관객이 "이건 추격이구나/잠입이구나/구출이구나"로 체감이 다름
+
+### 훅 품질 규칙
+- 각 화 ending hook는 **다음 화의 action format을 암시**해야 한다
+- BAD: "더 큰 위기가 다가온다" (막연)
+- GOOD: "윤서가 방송실 로그에서 지워진 시간대를 발견한다 — 그 시간에 누가 있었는지 확인하려면 체육관 CCTV실에 들어가야 한다" (다음 화 = infiltration)
+- 훅은 반드시 **"누가 + 무엇을 해야 하는지 + 왜 위험한지"**를 한 문장에 포함
+
+### 3분절 품질 규칙 (production readiness)
+각 화의 beginning / middle / climax는 각각:
+- **1개의 행동 목표** (누가 무엇을 시도하는가)
+- **1개의 방해/충돌** (무엇이 막는가)
+- **1개의 결과** (성공/실패/변화가 무엇인가)
+를 포함해야 한다. 3문장 이상이되, 위 3요소가 없으면 길이와 무관하게 실패.
+
+BAD beginning: "아침 등교 장면. 학생들이 복도를 지나간다. 윤서가 친구들과 대화한다."
+→ 목표/방해/결과 없음. 시각적이지만 서사적으로 비어 있음.
+
+GOOD beginning: "윤서가 출석부의 빈칸을 정정선으로 긋자 교실 뒤편이 일그러지고(목표: 공백수 위치 확인), 하린이 돌진하지만 잘못된 좌표에 착지하며(방해: 오판된 규칙), 대신 한서아의 책상이 현실에서 반쯤 밀려난다(결과: 서아가 표적이 됨)."
 
 ---
 

@@ -517,6 +517,7 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
       if (weaknesses) parts.push(`\n약점 상세:\n${weaknesses}`);
 
       parts.push(`\n반드시 위 지시를 직접 해결해서 점수를 ${target} 이상으로 올려라.`);
+      parts.push(`\n★ 절대 보호: AI 1 컨셉의 핵심 설정(세계관 규칙, 크리처 설정, 메인 캐릭터의 역할, 조연의 서사 기능, 사망 이벤트)은 변경하지 마라. 위 수정 지시는 이 핵심을 유지한 채 실행해라.`);
       return parts.filter(Boolean).join('\n');
     };
 
@@ -646,6 +647,7 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
 
       {
         let ai2BestScore = 0;
+        let bestEpisodes: StoryEpisodeArc[] = [...episodeList];
         const ai2Strategies: string[] = [];
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
           if (shouldAbort()) throw new Error('Pipeline stopped by user');
@@ -655,7 +657,11 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
           const ev = await evaluate('season');
           set({ evaluation: ev });
           const score = ev.weightedScore || ev.overallScore || 0;
-          if (score > ai2BestScore) ai2BestScore = score;
+          if (score > ai2BestScore) {
+            ai2BestScore = score;
+            bestEpisodes = [...get().episodes];
+            log('AI 2', `최고 점수 갱신! v${attempt} (${score.toFixed(1)}) 저장됨`, 'success');
+          }
           log('AI 2', `시즌 점수: ${score.toFixed(1)}/5 | 목표: ${targetScore}/5 | 최고: ${ai2BestScore.toFixed(1)}/5`, 'score');
 
           if (passesThreshold(ev)) {
@@ -664,7 +670,8 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
           }
 
           if (attempt >= maxRetries) {
-            log('AI 2', `최대 재시도 도달. 현재 점수(${score.toFixed(1)})로 진행.`, 'warn');
+            log('AI 2', `최대 재시도 도달. 최고 점수(${ai2BestScore.toFixed(1)}) 버전 복원.`, 'warn');
+            set({ episodes: bestEpisodes });
             break;
           }
 
@@ -679,7 +686,10 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
           }
 
           set({ pipelineStage: 'ai2_revise', generating: 'season' });
-          const ai2Brief = buildPlannerRevisionBrief(ev, plannerResult, score, targetScore);
+          let ai2Brief = buildPlannerRevisionBrief(ev, plannerResult, score, targetScore);
+          if (plannerResult.decision === 'revise_full') {
+            ai2Brief = '이전 시즌 플랜을 전면 재설계하라. 이전 구조에 얽매이지 말고 완전히 다른 엔진 배치와 아크 구조를 시도해라.\n\n' + ai2Brief;
+          }
 
           if (attempt === 1 || attempt % 2 === 0) {
             log('AI 2', `프롬프트 최적화 중... (${attempt}회차)`, 'info');
@@ -694,9 +704,12 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
             set({ episodes: reEps, generating: null });
             log('AI 2', `시즌 플랜 재생성 완료 (${reEps.length}화)`, 'success');
           } catch (seasonErr) {
-            log('AI 2', `시즌 플랜 재생성 실패: ${(seasonErr as Error).message}. 재시도합니다.`, 'warn');
-            set({ generating: null });
+            log('AI 2', `시즌 플랜 재생성 실패. 최고 버전 유지.`, 'warn');
+            set({ episodes: bestEpisodes, generating: null });
           }
+        }
+        if (bestEpisodes.length > 0) {
+          set({ episodes: bestEpisodes });
         }
       }
 
@@ -721,13 +734,20 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
         set({ script: scriptResult, generating: null });
         log('AI 2', `EP${ep} 대본 완료`, 'success');
 
+        let scriptBestScore = 0;
+        let bestScript = scriptResult;
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
           if (shouldAbort()) throw new Error('Pipeline stopped by user');
 
           log('AI 2', `EP${ep} 대본 평가 ${attempt}/${maxRetries}...`, 'info');
           const ev = await evaluate('script', ep);
           const score = ev.weightedScore || ev.overallScore || 0;
-          log('AI 2', `EP${ep} 대본 점수: ${score.toFixed(1)}/5`, 'score');
+          if (score > scriptBestScore) {
+            scriptBestScore = score;
+            bestScript = get().script;
+            log('AI 2', `EP${ep} 최고 점수 갱신! v${attempt} (${score.toFixed(1)}) 저장됨`, 'success');
+          }
+          log('AI 2', `EP${ep} 대본 점수: ${score.toFixed(1)}/5 | 최고: ${scriptBestScore.toFixed(1)}/5`, 'score');
 
           if (passesThreshold(ev)) {
             log('AI 2', `EP${ep} 대본 통과!`, 'success');
@@ -735,13 +755,17 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
           }
 
           if (attempt >= maxRetries) {
-            log('AI 2', `EP${ep} 대본 최대 재시도 도달. 진행.`, 'warn');
+            log('AI 2', `EP${ep} 대본 최대 재시도 도달. 최고 버전 복원.`, 'warn');
+            set({ script: bestScript });
             break;
           }
 
           set({ generating: 'script' });
           const plannerResult = await callPlanner('script', ev, attempt, []);
-          const scriptBrief = buildPlannerRevisionBrief(ev, plannerResult, score, targetScore);
+          let scriptBrief = buildPlannerRevisionBrief(ev, plannerResult, score, targetScore);
+          if (plannerResult.decision === 'revise_full') {
+            scriptBrief = '이전 대본을 전면 재설계하라. 이전 장면 구성에 얽매이지 말고 완전히 다른 비트 구조를 시도해라.\n\n' + scriptBrief;
+          }
 
           if ([1, Math.ceil(epCount / 2), epCount].includes(ep) && (attempt === 1 || attempt % 2 === 0)) {
             log('AI 2', `대본 프롬프트 최적화 중... (${attempt}회차)`, 'info');
@@ -753,10 +777,11 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
             const reScript = await apiPost(`/api/projects/${pid}/story/episodes/${ep}/script`, { revisionFeedback: scriptBrief });
             set({ script: reScript, generating: null });
           } catch (reScriptErr) {
-            log('AI 2', `EP${ep} 대본 재생성 실패: ${(reScriptErr as Error).message}`, 'warn');
-            set({ generating: null });
+            log('AI 2', `EP${ep} 대본 재생성 실패. 최고 버전 유지.`, 'warn');
+            set({ script: bestScript, generating: null });
           }
         }
+        if (bestScript) set({ script: bestScript });
       }
 
       // ════════════ AI 3: Clips per Episode ════════════
@@ -767,18 +792,27 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
 
         set({ currentEpisode: ep, generating: 'clips' });
         log('AI 3', `EP${ep}/${epCount} 클립 생성 중...`, 'info');
-        const clipResult = await apiPost(`/api/projects/${pid}/story/episodes/${ep}/clips`, {
-          density: 'cinematic_detail',
-          videoProvider,
-        });
-        set({
-          clips: Array.isArray(clipResult.clips) ? clipResult.clips : [],
-          frames: Array.isArray(clipResult.frames) ? clipResult.frames : [],
-          timeline: clipResult.timeline || '',
-          generating: null,
-        });
-        log('AI 3', `EP${ep} 클립 완료 (${clipResult.clips?.length || 0}개)`, 'success');
+        let clipResult;
+        try {
+          clipResult = await apiPost(`/api/projects/${pid}/story/episodes/${ep}/clips`, {
+            density: 'cinematic_detail',
+            videoProvider,
+          });
+          set({
+            clips: Array.isArray(clipResult.clips) ? clipResult.clips : [],
+            frames: Array.isArray(clipResult.frames) ? clipResult.frames : [],
+            timeline: clipResult.timeline || '',
+            generating: null,
+          });
+          log('AI 3', `EP${ep} 클립 완료 (${clipResult.clips?.length || 0}개)`, 'success');
+        } catch (clipInitErr) {
+          log('AI 3', `EP${ep} 클립 생성 실패: ${(clipInitErr as Error).message}. 이 에피소드 스킵.`, 'warn');
+          set({ generating: null });
+          continue;
+        }
 
+        let clipBestScore = 0;
+        let bestClips = { clips: Array.isArray(clipResult.clips) ? clipResult.clips : [], frames: Array.isArray(clipResult.frames) ? clipResult.frames : [], timeline: clipResult.timeline || '' };
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
           if (shouldAbort()) throw new Error('Pipeline stopped by user');
 
@@ -786,7 +820,12 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
           log('AI 3', `EP${ep} 클립 평가 ${attempt}/${maxRetries}...`, 'info');
           const ev = await evaluate('clips', ep);
           const score = ev.weightedScore || ev.overallScore || 0;
-          log('AI 3', `EP${ep} 클립 점수: ${score.toFixed(1)}/5`, 'score');
+          if (score > clipBestScore) {
+            clipBestScore = score;
+            bestClips = { clips: [...get().clips], frames: [...get().frames], timeline: get().timeline || '' };
+            log('AI 3', `EP${ep} 최고 점수 갱신! v${attempt} (${score.toFixed(1)}) 저장됨`, 'success');
+          }
+          log('AI 3', `EP${ep} 클립 점수: ${score.toFixed(1)}/5 | 최고: ${clipBestScore.toFixed(1)}/5`, 'score');
 
           if (passesThreshold(ev)) {
             log('AI 3', `EP${ep} 클립 통과!`, 'success');
@@ -794,13 +833,17 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
           }
 
           if (attempt >= maxRetries) {
-            log('AI 3', `EP${ep} 클립 최대 재시도 도달. 진행.`, 'warn');
+            log('AI 3', `EP${ep} 클립 최대 재시도 도달. 최고 버전 복원.`, 'warn');
+            set({ clips: bestClips.clips, frames: bestClips.frames, timeline: bestClips.timeline });
             break;
           }
 
           set({ pipelineStage: 'ai3_revise', generating: 'clips' });
           const plannerResult = await callPlanner('clips', ev, attempt, []);
-          const clipBrief = buildPlannerRevisionBrief(ev, plannerResult, score, targetScore);
+          let clipBrief = buildPlannerRevisionBrief(ev, plannerResult, score, targetScore);
+          if (plannerResult.decision === 'revise_full') {
+            clipBrief = '이전 클립 설계를 전면 재설계하라. 이전 샷 구성에 얽매이지 말고 완전히 다른 프레이밍과 시퀀스를 시도해라.\n\n' + clipBrief;
+          }
 
           if ([1, Math.ceil(epCount / 2), epCount].includes(ep) && (attempt === 1 || attempt % 2 === 0)) {
             log('AI 3', `클립 프롬프트 최적화 중... (${attempt}회차)`, 'info');
@@ -821,10 +864,11 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
               generating: null,
             });
           } catch (clipErr) {
-            log('AI 3', `EP${ep} 클립 재생성 실패: ${(clipErr as Error).message}`, 'warn');
-            set({ generating: null });
+            log('AI 3', `EP${ep} 클립 재생성 실패. 최고 버전 유지.`, 'warn');
+            set({ clips: bestClips.clips, frames: bestClips.frames, timeline: bestClips.timeline, generating: null });
           }
         }
+        set({ clips: bestClips.clips, frames: bestClips.frames, timeline: bestClips.timeline });
 
         set({ pipelineStage: 'ai3_clips' });
       }
