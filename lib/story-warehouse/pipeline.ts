@@ -1,72 +1,110 @@
 /**
- * Story Warehouse Pipeline — 4단계: 대량 생성 + 큐레이션
+ * Story Warehouse Pipeline — 4단계 재설계
  *
- * 1. 씨앗 5세트 생성 (1단계, AI 없음)
- * 2. 각 씨앗으로 스토리 전제 2개씩 = 10개 (2단계, AI)
- * 3. 10개를 평가해서 3.5점 이상만 필터링 (3단계, AI)
- * 4. 통과한 것만 반환
+ * 1. Seed Generator — 소재 씨앗 (AI 없음)
+ * 2. Drama Engine — 사건 체인 생성 (AI)
+ * 3. Anti-Cliche Filter — 공식 고착 방지
+ * 4. Evaluator — 새 기준으로 평가
  */
 
 import { generateSeedBatch, type StorySeed, adjustWeight, type SeedCategory } from './seed-generator';
-import { buildPremisesBatch, type StoryPremise } from './premise-builder';
-import { evaluateAndFilter, PASS_THRESHOLD, type EvaluatedPremise } from './idea-evaluator';
+import { generateDramaBatch, type DramaOutput } from './drama-engine';
+import { filterBatch } from './anti-cliche-filter';
+import { evaluateAndFilter, DEFAULT_PASS_THRESHOLD, type EvaluatedDrama } from './idea-evaluator';
 
 export interface WarehouseGenerationResult {
   totalSeeds: number;
-  totalPremises: number;
+  totalDramas: number;
   totalEvaluated: number;
-  passed: EvaluatedPremise[];
-  failed: EvaluatedPremise[];
+  passed: EvaluatedDrama[];
+  failed: EvaluatedDrama[];
   seeds: StorySeed[];
+  errors: string[];
+  clicheFiltered: number;
 }
 
 export interface GenerationProgress {
-  stage: 'seeds' | 'premises' | 'evaluating' | 'done';
+  stage: 'seeds' | 'drama' | 'filter' | 'evaluating' | 'done';
   current: number;
   total: number;
   message: string;
 }
 
-/**
- * 메인 파이프라인: 씨앗 → 전제 → 평가 → 필터링
- */
 export async function runWarehousePipeline(
   seedCount: number = 5,
+  passThreshold: number = DEFAULT_PASS_THRESHOLD,
   onProgress?: (p: GenerationProgress) => void,
 ): Promise<WarehouseGenerationResult> {
-  // Step 1: Seed Generation (no AI)
   onProgress?.({ stage: 'seeds', current: 0, total: seedCount, message: `씨앗 ${seedCount}개 조합 중...` });
   const seeds = generateSeedBatch(seedCount);
   onProgress?.({ stage: 'seeds', current: seeds.length, total: seedCount, message: `씨앗 ${seeds.length}개 생성 완료` });
 
-  // Step 2: Premise Building (AI — cheap model)
-  const totalPremises = seeds.length * 2;
-  onProgress?.({ stage: 'premises', current: 0, total: totalPremises, message: `스토리 전제 생성 중 (0/${seeds.length})...` });
+  const totalExpected = seeds.length * 2;
+  onProgress?.({ stage: 'drama', current: 0, total: totalExpected, message: `사건 체인 생성 중 (0/${seeds.length})...` });
 
-  const allPremises: StoryPremise[] = [];
+  const allDramas: DramaOutput[] = [];
+  const errors: string[] = [];
+
   for (let i = 0; i < seeds.length; i++) {
-    const premises = await buildPremisesBatch([seeds[i]]);
-    allPremises.push(...premises);
+    try {
+      const dramas = await generateDramaBatch([seeds[i]]);
+      allDramas.push(...dramas);
+      if (dramas.length === 0) {
+        errors.push(`씨앗 ${i + 1}: Drama 생성 결과 없음`);
+      }
+    } catch (err) {
+      const msg = (err as Error).message;
+      console.error(`[Pipeline] Drama build failed for seed ${i + 1}:`, msg);
+      errors.push(`씨앗 ${i + 1} Drama 생성 실패: ${msg}`);
+    }
     onProgress?.({
-      stage: 'premises',
-      current: allPremises.length,
-      total: totalPremises,
-      message: `스토리 전제 생성 중 (${i + 1}/${seeds.length})...`,
+      stage: 'drama',
+      current: allDramas.length,
+      total: totalExpected,
+      message: `사건 체인 생성 중 (${i + 1}/${seeds.length})... ${allDramas.length}개 생성됨`,
     });
   }
 
-  // Step 3: Evaluation + Filtering (AI — cheap model, temp=0)
-  onProgress?.({ stage: 'evaluating', current: 0, total: allPremises.length, message: `아이디어 평가 중 (0/${allPremises.length})...` });
+  if (allDramas.length === 0) {
+    const errorMsg = errors.length > 0
+      ? `모든 Drama 생성에 실패했습니다.\n${errors.join('\n')}`
+      : 'Drama 생성 결과가 없습니다. AI API 연결을 확인해주세요.';
+    throw new Error(errorMsg);
+  }
 
-  const evaluated: EvaluatedPremise[] = [];
-  for (let i = 0; i < allPremises.length; i++) {
-    const batch = await evaluateAndFilter([allPremises[i]]);
-    evaluated.push(...batch);
+  onProgress?.({ stage: 'filter', current: 0, total: allDramas.length, message: `공식 고착 필터링 중...` });
+  const { passed: filteredDramas, needsRegeneration } = filterBatch(allDramas);
+  const clicheFiltered = needsRegeneration.length;
+
+  if (needsRegeneration.length > 0) {
+    for (const nr of needsRegeneration) {
+      errors.push(`공식 고착 필터: "${nr.drama.title}" — ${nr.reason}`);
+    }
+  }
+
+  onProgress?.({
+    stage: 'filter',
+    current: filteredDramas.length,
+    total: allDramas.length,
+    message: `필터 완료: ${allDramas.length}개 중 ${filteredDramas.length}개 통과 (${clicheFiltered}개 공식 고착 제거)`,
+  });
+
+  onProgress?.({ stage: 'evaluating', current: 0, total: filteredDramas.length, message: `평가 중 (0/${filteredDramas.length})...` });
+
+  const evaluated: EvaluatedDrama[] = [];
+  for (let i = 0; i < filteredDramas.length; i++) {
+    try {
+      const batch = await evaluateAndFilter([filteredDramas[i]], passThreshold);
+      evaluated.push(...batch);
+    } catch (err) {
+      console.error(`[Pipeline] Evaluation failed for drama ${i + 1}:`, (err as Error).message);
+      errors.push(`"${filteredDramas[i].title}" 평가 실패: ${(err as Error).message}`);
+    }
     onProgress?.({
       stage: 'evaluating',
       current: i + 1,
-      total: allPremises.length,
-      message: `아이디어 평가 중 (${i + 1}/${allPremises.length})...`,
+      total: filteredDramas.length,
+      message: `평가 중 (${i + 1}/${filteredDramas.length})...`,
     });
   }
 
@@ -77,39 +115,34 @@ export async function runWarehousePipeline(
     stage: 'done',
     current: passed.length,
     total: evaluated.length,
-    message: `완료! ${evaluated.length}개 중 ${passed.length}개 통과 (${PASS_THRESHOLD}점 이상)`,
+    message: `완료! ${evaluated.length}개 중 ${passed.length}개 통과 (${passThreshold}점 이상)`,
   });
 
   return {
     totalSeeds: seeds.length,
-    totalPremises: allPremises.length,
+    totalDramas: allDramas.length,
     totalEvaluated: evaluated.length,
     passed,
     failed,
     seeds,
+    errors,
+    clicheFiltered,
   };
 }
 
-/**
- * 자가 개선: 사용자가 아이디어를 채택하면 씨앗 가중치를 올린다.
- */
-export function recordSelection(premise: EvaluatedPremise, seeds: StorySeed[]): void {
-  const seed = seeds.find(s => s.id === premise.seedId);
+export function recordSelection(drama: EvaluatedDrama, seeds: StorySeed[]): void {
+  const seed = seeds.find(s => s.id === drama.seedId);
   if (!seed) return;
-
-  const boost = premise.evaluation.overall >= 4.0 ? 0.3 : 0.15;
+  const boost = drama.evaluation.overall >= 4.0 ? 0.3 : 0.15;
   for (const el of seed.elements) {
     adjustWeight(el.category, el.item.id, boost);
   }
 }
 
-/**
- * 자가 개선: 사용자가 무시한 아이디어의 씨앗 가중치를 약간 내린다.
- */
-export function recordIgnored(premises: EvaluatedPremise[], selectedIds: Set<string>, seeds: StorySeed[]): void {
-  for (const p of premises) {
-    if (selectedIds.has(p.seedId)) continue;
-    const seed = seeds.find(s => s.id === p.seedId);
+export function recordIgnored(dramas: EvaluatedDrama[], selectedIds: Set<string>, seeds: StorySeed[]): void {
+  for (const d of dramas) {
+    if (selectedIds.has(d.seedId)) continue;
+    const seed = seeds.find(s => s.id === d.seedId);
     if (!seed) continue;
     for (const el of seed.elements) {
       adjustWeight(el.category as SeedCategory, el.item.id, -0.05);

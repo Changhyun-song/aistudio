@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { storyConceptRepo, storyCharacterRepo, projectRepo, referenceSynthesisRepo, storyInputBridgeRepo } from '@/lib/db/repository';
+import { storyConceptRepo, storyCharacterRepo, projectRepo, referenceSynthesisRepo, storyInputBridgeRepo, characterizerConfigRepo, characterVisualPromptRepo } from '@/lib/db/repository';
 import { generateStoryConcept, reviseStoryConcept, extractCharactersFromConcept } from '@/lib/story';
+import { generateCharacterVisualPrompts } from '@/lib/story/character-visual';
 import { isAIConfigured } from '@/lib/ai';
 import { buildStoryInputMarkdown } from '@/lib/ai/reference-lab';
-import type { GenreOverlay } from '@/types';
+import type { GenreOverlay, StoryCharacter } from '@/types';
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -69,6 +70,58 @@ async function autoExtractCharacters(projectId: string, conceptMarkdown: string)
   } catch { /* non-critical */ }
 }
 
+async function syncCharacterToCharacterizer(projectId: string) {
+  try {
+    const chars = storyCharacterRepo.list(projectId);
+    if (chars.length === 0) return;
+
+    const mainChar = chars.find(c => c.role?.includes('메인')) || chars[0];
+
+    const existingConfig = characterizerConfigRepo.getByProject(projectId);
+    if (existingConfig?.base_image_path) return;
+
+    characterizerConfigRepo.upsert(projectId, {
+      character_name: mainChar.name,
+      signature_item: mainChar.signature_item || '',
+      signature_color: mainChar.signature_color || '',
+      tone_keywords: '',
+    });
+
+    await generateBasePortraitForCharacters(projectId, chars);
+  } catch { /* non-critical */ }
+}
+
+async function generateBasePortraitForCharacters(projectId: string, chars: StoryCharacter[]) {
+  try {
+    const project = projectRepo.get(projectId);
+    let genreOverlay: GenreOverlay | undefined;
+    try {
+      const concept = storyConceptRepo.getByProject(projectId);
+      if (concept?.genre_overlay_json) genreOverlay = JSON.parse(concept.genre_overlay_json);
+    } catch { /* empty */ }
+
+    for (const char of chars) {
+      const existing = characterVisualPromptRepo.getByCharacter(char.id);
+      if (existing?.mj_base_prompt) continue;
+
+      const result = await generateCharacterVisualPrompts(char, genreOverlay);
+      characterVisualPromptRepo.upsert(projectId, char.id, {
+        character_name: char.name,
+        visual_brief: result.visualBrief,
+        mj_base_prompt: result.mjBasePrompt,
+        mj_portrait_prompt: result.mjPortraitPrompt,
+        mj_full_body_prompt: result.mjFullBodyPrompt,
+        mj_action_prompt: result.mjActionPrompt,
+        mj_expression_sheet: result.mjExpressionSheet,
+        negative_prompts: result.negativePrompts,
+        style_keywords: result.styleKeywords,
+      });
+    }
+  } catch (err) {
+    console.error('[AutoVisualPrompt]', (err as Error).message);
+  }
+}
+
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const project = projectRepo.get(id);
@@ -101,6 +154,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       });
 
       await autoExtractCharacters(id, finalMarkdown);
+      syncCharacterToCharacterizer(id).catch(() => {});
       return NextResponse.json(updated);
     }
 
@@ -108,6 +162,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       const existing = storyConceptRepo.getByProject(id);
       if (!existing?.approved_markdown) return NextResponse.json({ error: 'No concept to extract from' }, { status: 400 });
       await autoExtractCharacters(id, existing.approved_markdown);
+      syncCharacterToCharacterizer(id).catch(() => {});
       const chars = storyCharacterRepo.list(id);
       return NextResponse.json({ characters: chars });
     }
@@ -169,6 +224,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     });
 
     await autoExtractCharacters(id, result);
+    syncCharacterToCharacterizer(id).catch(() => {});
 
     return NextResponse.json(concept);
   } catch (err: unknown) {

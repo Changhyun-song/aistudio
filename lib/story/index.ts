@@ -61,12 +61,15 @@ export type {
 
 export {
   optimizePrompt,
+  consolidateGlobalRules,
+  checkAndConsolidate,
 } from './optimizer';
 export type {
   OptimizeStage,
   PromptDiagnosis,
   SupplementRule,
   PromptOptimizeResult,
+  ConsolidationResult,
 } from './optimizer';
 
 export {

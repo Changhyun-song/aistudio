@@ -30,35 +30,35 @@ function pickFromCategory(category: SeedCategory): SeedItem | null {
 
 /**
  * 하나의 씨앗 세트를 생성한다.
- * 6개 카테고리 중 3~5개를 랜덤으로 선택하여 조합.
+ *
+ * 핵심 규칙:
+ * - what_if 하나가 이야기의 중심축 (필수)
+ * - conflict_type 하나가 갈등의 방향 (필수 — "조직 음모" 고착 방지)
+ * - 나머지 0~1개는 중심을 돋보이게 하는 보조 소재
+ * - 총 2~3개. 절대 4개 이상 넣지 않는다.
  */
 export function generateSeed(elementCount: number = 0): StorySeed {
-  const allCategories: SeedCategory[] = [
-    'genre_combo', 'era_setting', 'what_if',
-    'character_irony', 'relationship_structure', 'social_theme',
+  const count = elementCount > 0 ? Math.min(elementCount, 3) : (Math.random() < 0.5 ? 2 : 3);
+
+  const elements: { category: SeedCategory; item: SeedItem }[] = [];
+
+  const whatIf = pickFromCategory('what_if');
+  if (whatIf) elements.push({ category: 'what_if', item: whatIf });
+
+  const conflictType = pickFromCategory('conflict_type');
+  if (conflictType) elements.push({ category: 'conflict_type', item: conflictType });
+
+  const supportCategories: SeedCategory[] = [
+    'genre_combo', 'era_setting', 'character_irony',
+    'relationship_structure', 'social_theme',
   ];
+  const shuffled = [...supportCategories].sort(() => Math.random() - 0.5);
 
-  const count = elementCount > 0
-    ? Math.min(elementCount, allCategories.length)
-    : 3 + Math.floor(Math.random() * 3); // 3~5
-
-  const shuffled = [...allCategories].sort(() => Math.random() - 0.5);
-  const selected = shuffled.slice(0, count);
-
-  // what_if는 스토리의 핵심이므로 70% 확률로 포함
-  if (!selected.includes('what_if') && Math.random() < 0.7) {
-    selected[selected.length - 1] = 'what_if';
+  for (const cat of shuffled) {
+    if (elements.length >= count) break;
+    const item = pickFromCategory(cat);
+    if (item) elements.push({ category: cat, item });
   }
-
-  // genre_combo는 기본 뼈대이므로 80% 확률로 포함
-  if (!selected.includes('genre_combo') && Math.random() < 0.8) {
-    selected[0] = 'genre_combo';
-  }
-
-  const elements = selected.map(category => {
-    const item = pickFromCategory(category);
-    return item ? { category, item } : null;
-  }).filter((e): e is NonNullable<typeof e> => e !== null);
 
   return {
     id: nanoid(10),
@@ -158,15 +158,30 @@ export function seedToReadableText(seed: StorySeed): string {
  * 씨앗 세트를 AI 프롬프트용 텍스트로 변환
  */
 export function seedToPromptText(seed: StorySeed): string {
-  const parts = seed.elements.map(e => {
-    switch (e.category) {
-      case 'genre_combo': return `장르: ${e.item.value}`;
-      case 'era_setting': return `배경: ${e.item.value}`;
-      case 'what_if': return `핵심 전제: ${e.item.value}`;
-      case 'character_irony': return `주인공 특성: ${e.item.value}`;
-      case 'relationship_structure': return `관계 구조: ${e.item.value}`;
-      case 'social_theme': return `사회적 테마: ${e.item.value}`;
+  const whatIf = seed.elements.find(e => e.category === 'what_if');
+  const conflictType = seed.elements.find(e => e.category === 'conflict_type');
+  const support = seed.elements.filter(e => e.category !== 'what_if' && e.category !== 'conflict_type');
+
+  const lines: string[] = [];
+  if (whatIf) {
+    lines.push(`★ 이야기의 핵심 전제 (what-if): ${whatIf.item.value}`);
+    lines.push('  → 이 전제가 이야기의 중심축이다. 모든 것은 이 질문에서 시작한다.');
+  }
+  if (conflictType) {
+    lines.push(`\n★★ 갈등의 방향 (반드시 이 유형의 갈등으로 써라):`);
+    lines.push(`  ${conflictType.item.value}`);
+    lines.push('  → 이 갈등 유형을 벗어나지 마라. 조직/회사/정부의 음모로 대체하지 마라.');
+  }
+  if (support.length > 0) {
+    lines.push(`\n보조 소재 (핵심 전제를 돋보이게 하는 배경/톤):`);
+    for (const e of support) {
+      const label = e.category === 'genre_combo' ? '장르 톤'
+        : e.category === 'era_setting' ? '배경'
+        : e.category === 'character_irony' ? '주인공 특성'
+        : e.category === 'relationship_structure' ? '관계'
+        : '사회적 배경';
+      lines.push(`- ${label}: ${e.item.value}`);
     }
-  });
-  return parts.join('\n');
+  }
+  return lines.join('\n');
 }

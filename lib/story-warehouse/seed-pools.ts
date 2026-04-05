@@ -28,7 +28,8 @@ export type SeedCategory =
   | 'what_if'
   | 'character_irony'
   | 'relationship_structure'
-  | 'social_theme';
+  | 'social_theme'
+  | 'conflict_type';
 
 export interface StorySeed {
   id: string;
@@ -162,6 +163,16 @@ const SOCIAL_THEMES: SeedItem[] = [
   { id: 'st_15', value: '디지털 유산과 사후 데이터', weight: 1.0, source: 'built_in' },
 ];
 
+const CONFLICT_TYPES: SeedItem[] = [
+  { id: 'ct_01', value: '관계 갈등 — 소재 때문에 사랑하는 사람과의 관계가 위태로워진다. 적은 조직이 아니라 가까운 사람이다.', weight: 1.0, source: 'built_in' },
+  { id: 'ct_02', value: '내면 갈등 — 소재가 주는 능력/저주를 받아들일 것인가, 거부할 것인가. 주인공 안의 싸움이다.', weight: 1.0, source: 'built_in' },
+  { id: 'ct_03', value: '상황 갈등 — 소재가 일상에서 만드는 현실적이고 구체적인 문제들. 거대한 적 없이 일상이 무너진다.', weight: 1.0, source: 'built_in' },
+  { id: 'ct_04', value: '도덕 갈등 — 소재를 어떻게 쓰는 게 옳은가? 두 가지 "옳음" 사이에서 선택해야 한다.', weight: 1.0, source: 'built_in' },
+  { id: 'ct_05', value: '성장 갈등 — 소재를 통해 자기 자신의 상처/한계를 이해하고 넘어서는 과정. 적은 과거의 나 자신이다.', weight: 1.0, source: 'built_in' },
+  { id: 'ct_06', value: '상실 갈등 — 소재가 소중한 무언가를 앗아가거나, 이미 잃은 것을 되돌릴 기회를 준다. 핵심은 놓아줌과 집착이다.', weight: 1.0, source: 'built_in' },
+  { id: 'ct_07', value: '정체성 갈등 — 소재가 "나는 누구인가"라는 질문을 던진다. 주인공의 정체성 자체가 흔들린다.', weight: 1.0, source: 'built_in' },
+];
+
 export const DEFAULT_POOLS: SeedPool[] = [
   { category: 'genre_combo', label: '장르 조합', items: GENRE_COMBOS },
   { category: 'era_setting', label: '시대/배경', items: ERA_SETTINGS },
@@ -169,6 +180,7 @@ export const DEFAULT_POOLS: SeedPool[] = [
   { category: 'character_irony', label: '캐릭터 아이러니', items: CHARACTER_IRONIES },
   { category: 'relationship_structure', label: '관계 구조', items: RELATIONSHIP_STRUCTURES },
   { category: 'social_theme', label: '사회적 소재', items: SOCIAL_THEMES },
+  { category: 'conflict_type', label: '갈등 유형', items: CONFLICT_TYPES },
 ];
 
 export const CATEGORY_LABELS: Record<SeedCategory, string> = {
@@ -178,4 +190,5 @@ export const CATEGORY_LABELS: Record<SeedCategory, string> = {
   character_irony: '캐릭터 아이러니',
   relationship_structure: '관계 구조',
   social_theme: '사회적 소재',
+  conflict_type: '갈등 유형',
 };

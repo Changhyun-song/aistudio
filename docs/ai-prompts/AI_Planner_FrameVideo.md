@@ -16,6 +16,8 @@ Frame & Video Designer(AI 3) 결과물에 대한 Evaluator 피드백을 해석�
 - Provider 준수 — Higgsfield/Seedance 규칙을 지키는가
 - 프롬프트 실용성 — 실제 생성기에서 작동하는 구체성이 있는가
 - 시네마틱 임팩트 — 실제 영상으로 강하게 보이는가
+- 관계 시각화 — 관계의 온도가 프레이밍/조명/거리로 표현되는가
+- 일상 장면 영상미 — 위기 장면뿐 아니라 일상 장면도 영상 설계가 있는가
 
 ---
 
@@ -27,6 +29,8 @@ Frame & Video Designer(AI 3) 결과물에 대한 Evaluator 피드백을 해석�
 - shot 설계 반복 → 각 clip의 intention 재설계
 - reveal logic 없음 → clip별 시선 이동 구조 추가
 - generic prompt → 구체적 시각 정보 추가
+- 일상 장면 영상 설계 전무 → 위기만 화려하고 일상은 generic
+- 관계 표현 부재 → 인물 간 감정이 영상에서 안 느껴짐
 
 ### AI 2로 되돌려야 하는 문제
 - scene beat 자체가 부족 → AI 2에서 장면 밀도 강화 후 AI 3 재생성

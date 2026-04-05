@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { projectRepo, characterizerConfigRepo, characterizerAnchorRepo } from '@/lib/db/repository';
+import { projectRepo, characterizerConfigRepo, characterizerAnchorRepo, storyCharacterRepo, characterVisualPromptRepo } from '@/lib/db/repository';
 import { generateAnchorShot, isGeminiConfigured } from '@/lib/providers/gemini/gemini-image-provider';
 import { generateAllAnchorPrompts } from '@/lib/characterizer/shot-prompt-engine';
 
@@ -9,7 +9,15 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const { id } = await params;
   const config = characterizerConfigRepo.getByProject(id);
   const anchors = characterizerAnchorRepo.listByProject(id);
-  return NextResponse.json({ config: config || null, anchors, geminiConfigured: isGeminiConfigured() });
+  const storyCharacters = storyCharacterRepo.list(id);
+  const visualPrompts = characterVisualPromptRepo.listByProject(id);
+  return NextResponse.json({
+    config: config || null,
+    anchors,
+    geminiConfigured: isGeminiConfigured(),
+    storyCharacters,
+    visualPrompts,
+  });
 }
 
 export async function PUT(req: NextRequest, { params }: Params) {
@@ -23,6 +31,22 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { id } = await params;
   const body = await req.json();
   const action = body.action as string;
+
+  if (action === 'sync_character') {
+    const charId = body.characterId as string;
+    if (!charId) return NextResponse.json({ error: 'characterId required' }, { status: 400 });
+    const char = storyCharacterRepo.get(charId);
+    if (!char) return NextResponse.json({ error: 'Character not found' }, { status: 404 });
+
+    const existingConfig = characterizerConfigRepo.getByProject(id);
+    const config = characterizerConfigRepo.upsert(id, {
+      character_name: char.name,
+      signature_item: char.signature_item || '',
+      signature_color: char.signature_color || '',
+      base_image_path: existingConfig?.base_image_path || '',
+    });
+    return NextResponse.json(config);
+  }
 
   if (action === 'generate_anchors') {
     const project = projectRepo.get(id);

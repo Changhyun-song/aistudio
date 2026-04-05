@@ -45,7 +45,11 @@ class OpenAIProvider implements AIProvider {
   private defaultModel: string;
 
   constructor() {
-    this.client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || '' });
+    this.client = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY || '',
+      timeout: 150_000, // 150 seconds per request
+      maxRetries: 0,    // we handle retries ourselves in callWithRetry
+    });
     this.defaultModel = process.env.OPENAI_MODEL || 'gpt-5.4-mini';
   }
 
@@ -83,9 +87,97 @@ class OpenAIProvider implements AIProvider {
     } catch { /* best-effort logging */ }
   }
 
+  private formatError(err: unknown, model: string, stage?: string): string {
+    const e = err as Record<string, unknown>;
+    const parts: string[] = [];
+
+    if (stage) parts.push(`[stage: ${stage}]`);
+    parts.push(`[model: ${model}]`);
+
+    if (e && typeof e === 'object') {
+      const status = (e as any).status ?? (e as any).statusCode ?? (e as any).code;
+      if (status) parts.push(`[HTTP ${status}]`);
+
+      const errObj = (e as any).error;
+      if (errObj && typeof errObj === 'object') {
+        if (errObj.type) parts.push(`[type: ${errObj.type}]`);
+        if (errObj.code) parts.push(`[code: ${errObj.code}]`);
+        if (errObj.message) parts.push(errObj.message);
+      } else if ((e as any).message) {
+        parts.push((e as any).message);
+      }
+    } else {
+      parts.push(String(err));
+    }
+
+    return parts.join(' ');
+  }
+
+  private async callWithRetry(
+    reqParams: ReturnType<typeof this.buildRequest>,
+    opts?: AIChatOpts,
+    maxRetries = 2,
+  ): Promise<OpenAI.Chat.Completions.ChatCompletion> {
+    const stage = opts?.trackingContext?.stage;
+    let lastError: unknown;
+
+    const sysLen = reqParams.messages[0]?.content?.length ?? 0;
+    const userLen = reqParams.messages[1]?.content?.length ?? 0;
+    console.log(`[AI] ${stage || 'unknown'} model=${reqParams.model} sys=${sysLen}chars user=${userLen}chars total=${sysLen + userLen}chars`);
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await this.client.chat.completions.create(reqParams);
+      } catch (err) {
+        lastError = err;
+        const errMsg = this.formatError(err, reqParams.model, stage);
+        console.error(`[AI] Attempt ${attempt + 1}/${maxRetries + 1} failed: ${errMsg}`);
+
+        if (attempt < maxRetries) {
+          const isRetryable = this.isRetryableError(err);
+          if (!isRetryable) {
+            console.error(`[AI] Non-retryable error, skipping retry`);
+            break;
+          }
+          const delay = (attempt + 1) * 3000;
+          console.log(`[AI] Retrying in ${delay}ms...`);
+          await new Promise(r => setTimeout(r, delay));
+        }
+      }
+    }
+
+    const finalMsg = this.formatError(lastError, reqParams.model, stage);
+    const enriched = new Error(finalMsg);
+    (enriched as any).originalError = lastError;
+    throw enriched;
+  }
+
+  private isRetryableError(err: unknown): boolean {
+    const e = err as Record<string, unknown>;
+    if (!e || typeof e !== 'object') return true;
+
+    const status = (e as any).status ?? (e as any).statusCode;
+    if (status === 401 || status === 403) return false;
+
+    if (status === 400) {
+      const errMsg = String((e as any).error?.message || (e as any).message || '');
+      if (errMsg.includes('could not parse the JSON body') || errMsg.includes('invalid JSON')) {
+        return true;
+      }
+      return false;
+    }
+
+    if (status === 429 || status >= 500) return true;
+
+    const msg = String((e as any).message || '');
+    if (msg.includes('Failed to fetch') || msg.includes('ECONNRESET') || msg.includes('ETIMEDOUT') || msg.includes('fetch failed')) return true;
+
+    return true;
+  }
+
   async chat(system: string, user: string, opts?: AIChatOpts): Promise<string> {
     const req = this.buildRequest(system, user, opts);
-    const res = await this.client.chat.completions.create(req);
+    const res = await this.callWithRetry(req, opts);
     const usage: AIUsage = {
       promptTokens: res.usage?.prompt_tokens ?? 0,
       completionTokens: res.usage?.completion_tokens ?? 0,
@@ -97,7 +189,7 @@ class OpenAIProvider implements AIProvider {
 
   async chatWithUsage(system: string, user: string, opts?: AIChatOpts): Promise<AIChatResult> {
     const req = this.buildRequest(system, user, opts);
-    const res = await this.client.chat.completions.create(req);
+    const res = await this.callWithRetry(req, opts);
     const usage: AIUsage = {
       promptTokens: res.usage?.prompt_tokens ?? 0,
       completionTokens: res.usage?.completion_tokens ?? 0,

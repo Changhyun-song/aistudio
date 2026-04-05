@@ -10,6 +10,8 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { useWarehouseStore } from '@/lib/store/warehouse-store';
+import { useStoryStore } from '@/lib/store/story-store';
 import type { ProjectMode, PipelineRunSummary } from '@/types';
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
@@ -45,14 +47,108 @@ const PIPELINE_STAGE_LABELS: Record<string, string> = {
   failed: '실패',
 };
 
+function WarehouseButton() {
+  const router = useRouter();
+  const { generating, stageLabel, stage } = useWarehouseStore();
+  return (
+    <Button
+      variant="outline"
+      className={`mr-2 relative ${generating ? 'border-emerald-500/50' : ''}`}
+      onClick={() => router.push('/story-warehouse')}
+    >
+      Story Warehouse
+      {generating && (
+        <span className="ml-2 flex items-center gap-1.5">
+          <span className="relative flex h-2 w-2 shrink-0">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+          </span>
+          <span className="text-[10px] text-emerald-400 max-w-[120px] truncate">
+            {stageLabel || '생성 중'}
+          </span>
+        </span>
+      )}
+      {!generating && stage === 'done' && (
+        <span className="ml-1.5 text-[10px] text-emerald-400">✓</span>
+      )}
+    </Button>
+  );
+}
+
+interface PipelineLogEntry {
+  stage: string;
+  message: string;
+  timestamp: number;
+  type: 'info' | 'success' | 'warn' | 'error' | 'score';
+}
+
+function formatKoreanDate(dateStr: string | null | undefined): string {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleString('ko-KR', { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function PipelineLogModal({ projectId, runId, onClose }: { projectId: string; runId: string; onClose: () => void }) {
+  const [logs, setLogs] = useState<PipelineLogEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`/api/projects/${projectId}/pipeline`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'get_logs', runId }),
+        });
+        const data = await res.json();
+        setLogs(Array.isArray(data.logs) ? data.logs : []);
+      } catch { setLogs([]); }
+      setLoading(false);
+    })();
+  }, [projectId, runId]);
+
+  const typeIcon: Record<string, string> = { success: '\u2713', warn: '\u26a0', error: '\u2717', score: '\u2605', info: '\u2192' };
+  const typeColor: Record<string, string> = { success: 'text-emerald-400', warn: 'text-yellow-400', error: 'text-red-400', score: 'text-purple-400', info: 'text-zinc-400' };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+      <div className="bg-zinc-900 border border-zinc-700 rounded-lg w-full max-w-3xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-700">
+          <h3 className="text-sm font-semibold">파이프라인 실행 로그</h3>
+          <button onClick={onClose} className="text-zinc-400 hover:text-white text-lg">&times;</button>
+        </div>
+        <div className="flex-1 overflow-auto p-4 font-mono text-xs leading-relaxed">
+          {loading && <p className="text-zinc-500">로딩 중...</p>}
+          {!loading && logs.length === 0 && <p className="text-zinc-500">저장된 로그가 없습니다.</p>}
+          {logs.map((l, i) => {
+            const time = new Date(l.timestamp).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            return (
+              <div key={i} className={`${typeColor[l.type] || 'text-zinc-400'} whitespace-pre-wrap mb-0.5`}>
+                <span className="text-zinc-600">{time}</span>{' '}
+                <span>{typeIcon[l.type] || '\u2192'}</span>{' '}
+                <span className="text-zinc-500">[{l.stage}]</span>{' '}
+                {l.message}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ProjectsPage() {
   const router = useRouter();
   const { projects, fetchProjects, createProject, deleteProject } = useAppStore();
+  const resumePipeline = useStoryStore(s => s.resumePipeline);
   const [newName, setNewName] = useState('');
   const [newDesc, setNewDesc] = useState('');
   const [newMode, setNewMode] = useState<ProjectMode>('story_studio');
   const [open, setOpen] = useState(false);
   const [pipelineMap, setPipelineMap] = useState<Record<string, PipelineRunSummary>>({});
+  const [logModal, setLogModal] = useState<{ projectId: string; runId: string } | null>(null);
+  const [resumingId, setResumingId] = useState<string | null>(null);
 
   const fetchPipelines = useCallback(async () => {
     try {
@@ -72,6 +168,17 @@ export default function ProjectsPage() {
     const interval = setInterval(fetchPipelines, 3000);
     return () => clearInterval(interval);
   }, [pipelineMap, fetchPipelines]);
+
+  const handleResume = async (e: React.MouseEvent, projectId: string) => {
+    e.stopPropagation();
+    setResumingId(projectId);
+    try {
+      await resumePipeline(projectId);
+      fetchPipelines();
+    } finally {
+      setResumingId(null);
+    }
+  };
 
   const handleCreate = async () => {
     if (!newName.trim()) return;
@@ -96,9 +203,7 @@ export default function ProjectsPage() {
             <h1 className="text-xl font-bold tracking-tight">AI Studio</h1>
             <p className="text-xs text-muted-foreground">Story + Character Pipeline</p>
           </div>
-          <Button variant="outline" className="mr-2" onClick={() => router.push('/story-warehouse')}>
-            Story Warehouse
-          </Button>
+          <WarehouseButton />
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger render={<Button />}>+ 새 프로젝트</DialogTrigger>
             <DialogContent>
@@ -171,13 +276,25 @@ export default function ProjectsPage() {
                       <div className="mb-3 space-y-2">
                         <div className="flex items-center gap-2">
                           {isRunning && <span className="relative flex h-2 w-2 shrink-0"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" /><span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" /></span>}
-                          <span className="text-xs font-medium text-emerald-400">
+                          {pipeline.status === 'failed' && <span className="relative flex h-2 w-2 shrink-0"><span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" /></span>}
+                          <span className={`text-xs font-medium ${pipeline.status === 'failed' ? 'text-red-400' : pipeline.status === 'aborted' ? 'text-yellow-400' : 'text-emerald-400'}`}>
                             {pipeline.current_stage_label || PIPELINE_STAGE_LABELS[pipeline.current_stage] || pipeline.current_stage}
                           </span>
                           {pipeline.status === 'completed' && <Badge className="bg-emerald-600 text-white text-[10px] h-4">완료</Badge>}
                           {pipeline.status === 'failed' && <Badge className="bg-red-600 text-white text-[10px] h-4">실패</Badge>}
                           {pipeline.status === 'aborted' && <Badge className="bg-yellow-600 text-white text-[10px] h-4">중단</Badge>}
                         </div>
+
+                        {pipeline.status === 'failed' && pipeline.error_message && (
+                          <p className="text-[11px] text-red-400/80 line-clamp-2 pl-4">{pipeline.error_message}</p>
+                        )}
+
+                        {(pipeline.completed_at || pipeline.updated_at) && !isRunning && (
+                          <p className="text-[10px] text-muted-foreground pl-4">
+                            {formatKoreanDate(pipeline.completed_at || pipeline.updated_at)}
+                          </p>
+                        )}
+
                         {(isRunning || pipeline.status === 'completed') && (
                           <div className="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden">
                             <div
@@ -187,6 +304,26 @@ export default function ProjectsPage() {
                           </div>
                         )}
                         {isRunning && <span className="text-[10px] text-muted-foreground">{pct}%</span>}
+
+                        {!isRunning && (
+                          <div className="flex items-center gap-2 pl-4">
+                            <button
+                              className="text-[10px] text-blue-400 hover:text-blue-300 underline underline-offset-2"
+                              onClick={e => { e.stopPropagation(); setLogModal({ projectId: p.id, runId: pipeline.id }); }}
+                            >
+                              로그 보기
+                            </button>
+                            {(pipeline.status === 'failed' || pipeline.status === 'aborted') && (
+                              <button
+                                className="text-[10px] text-emerald-400 hover:text-emerald-300 underline underline-offset-2 disabled:opacity-50"
+                                disabled={resumingId === p.id}
+                                onClick={e => handleResume(e, p.id)}
+                              >
+                                {resumingId === p.id ? '재시작 중...' : '이어서 실행'}
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -201,6 +338,13 @@ export default function ProjectsPage() {
           </div>
         )}
       </main>
+      {logModal && (
+        <PipelineLogModal
+          projectId={logModal.projectId}
+          runId={logModal.runId}
+          onClose={() => setLogModal(null)}
+        />
+      )}
     </div>
   );
 }

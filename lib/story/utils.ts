@@ -1,9 +1,14 @@
-import { promptSupplementRepo } from '@/lib/db/repository';
+import { promptSupplementRepo, promptSupplementRuleRepo } from '@/lib/db/repository';
 import type { GenreOverlay } from '@/types';
 
 export function getSupplementForStage(projectId: string, stage: string): string {
   try {
-    return promptSupplementRepo.getEffective(projectId, stage);
+    const ruleText = promptSupplementRuleRepo.getEffectiveRuleText(projectId, stage);
+    const legacySupplement = promptSupplementRepo.getEffective(projectId, stage);
+    const parts: string[] = [];
+    if (ruleText) parts.push(ruleText);
+    if (legacySupplement) parts.push(`[레거시 보충]\n${legacySupplement}`);
+    return parts.join('\n\n');
   } catch { return ''; }
 }
 
@@ -12,6 +17,8 @@ export function isContentAgnostic(text: string): boolean {
   const matches = text.match(koreanNamePattern) || [];
   if (matches.length >= 3) return false;
   if (/[가-힣]{2,4}=[가-힣]/g.test(text)) return false;
+  const specificTerms = /특정\s*(세계관|캐릭터|장소|마법|능력|왕국|학교)/g;
+  if ((text.match(specificTerms) || []).length >= 2) return false;
   return true;
 }
 
@@ -29,12 +36,23 @@ export const MODEL_OPTIMIZER = process.env.OPENAI_MODEL_OPTIMIZER  || process.en
 export function extractJsonBlock(raw: string): string {
   const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (fenced) return fenced[1].trim();
+
   const firstBrace = raw.indexOf('{');
   const lastBrace = raw.lastIndexOf('}');
-  if (firstBrace !== -1 && lastBrace > firstBrace) return raw.slice(firstBrace, lastBrace + 1);
   const firstBracket = raw.indexOf('[');
   const lastBracket = raw.lastIndexOf(']');
-  if (firstBracket !== -1 && lastBracket > firstBracket) return raw.slice(firstBracket, lastBracket + 1);
+
+  const hasBrace = firstBrace !== -1 && lastBrace > firstBrace;
+  const hasBracket = firstBracket !== -1 && lastBracket > firstBracket;
+
+  if (hasBrace && hasBracket) {
+    if (firstBracket < firstBrace) {
+      return raw.slice(firstBracket, lastBracket + 1);
+    }
+    return raw.slice(firstBrace, lastBrace + 1);
+  }
+  if (hasBracket) return raw.slice(firstBracket, lastBracket + 1);
+  if (hasBrace) return raw.slice(firstBrace, lastBrace + 1);
   return raw.trim();
 }
 

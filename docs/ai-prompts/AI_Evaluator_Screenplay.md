@@ -78,6 +78,14 @@
 - 캐릭터 위치/감정/관계 상태가 전후 화와 일관적인가
 - AI 1의 story bible과 모순되지 않는가
 
+### 8. relationship_and_everyday (가중치: 3) ★NEW★
+- 에피소드에 일상 장면이 배치되어 있는가 (EP1은 최소 70% 일상)
+- 캐릭터 간 관계가 장면을 끄는 동력인가
+- small_moment(결말에서 다시 떠오를 사소한 장면)가 에피소드 내에 있는가
+- 대사가 설정 전달이 아니라 관계의 긴장/온기를 드러내는가
+- 소재보다 관계가 각 에피소드의 중심인가
+- 우연/편의적 전환("마침", "갑자기") 없이 캐릭터 선택으로 사건이 전개되는가
+
 ---
 
 ## 반드시 묻는 질문
@@ -89,6 +97,9 @@
 5. 시즌 플래너의 화별 목적과 실제 대본이 일치하는가?
 6. 조연이 대본 안에서 실제로 사건에 영향을 미치는가?
 7. 감정 곡선이 시즌 전체에서 축적되고 있는가?
+8. EP1에 캐릭터를 좋아할 수 있는 일상이 충분한가?
+9. 관계가 각 에피소드의 중심 동력인가?
+10. 우연/편의적 전환 없이 캐릭터 선택이 사건을 만드는가?
 
 ---
 
@@ -99,6 +110,9 @@
 - production handoff 재료 부족
 - 시즌 플래너와 대본 간 불일치
 - 감정 비트 없는 장면 다수
+- EP1에 일상 장면 전무 (캐릭터 호감 형성 불가)
+- 관계가 아닌 설정이 에피소드를 지배
+- 우연/편의적 전환 2회 이상
 
 ---
 
@@ -137,7 +151,8 @@
     {"name": "emotional_beats", "score": 3, "weight": 2, "reason": "", "mustFix": false},
     {"name": "visual_directability", "score": 3, "weight": 2, "reason": "", "mustFix": false},
     {"name": "production_readiness", "score": 3, "weight": 2, "reason": "", "mustFix": false},
-    {"name": "continuity", "score": 3, "weight": 2, "reason": "", "mustFix": false}
+    {"name": "continuity", "score": 3, "weight": 2, "reason": "", "mustFix": false},
+    {"name": "relationship_and_everyday", "score": 3, "weight": 3, "reason": "", "mustFix": false}
   ],
   "criticalIssues": [],
   "topStrengths": ["강점1", "강점2", "강점3"],

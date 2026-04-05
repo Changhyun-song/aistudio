@@ -523,6 +523,7 @@ export interface PipelineRun {
   target_score: number;
   max_retries: number;
   error_message: string;
+  logs_json: string;
   summary_json: string;
   started_at: string;
   updated_at: string;
@@ -552,8 +553,10 @@ export interface PipelineRunSummary {
   current_stage: string;
   current_stage_label: string;
   progress_pct: number;
+  error_message: string;
   started_at: string;
   updated_at: string;
+  completed_at: string | null;
 }
 
 export interface CharacterVisualPrompt {

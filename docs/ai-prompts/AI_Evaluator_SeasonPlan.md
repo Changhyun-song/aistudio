@@ -62,6 +62,14 @@
 - **AI 2 대본화**를 위해 에피소드별 **beginning / middle / climax**(또는 동등한 3분절 구조)가 있는가
 - 각 분절이 **3문장 이상**이며 **구체적**인가(한 줄 요약 수준이면 감점)
 
+### 8. relationship_balance (가중치: 3) ★NEW★
+- 시즌 전체에서 관계 발전/위기가 사건 전개의 중심인가
+- EP1에 일상/관계 설정이 충분히 배치되었는가 (최소 70%)
+- 소재가 관계를 압박하는 장치로 작동하는가
+- 에피소드별 small_moment가 설계되어 있는가
+- 같은 관계 패턴이 반복되지 않는가 (매 화 다른 관계 동력)
+- 4화 미니시리즈에서 세계관 규칙이 1개를 넘지 않는가
+
 ---
 
 ## 반드시 묻는 질문
@@ -73,6 +81,9 @@
 5. 화간 훅이 구체적인가, 아니면 공허한 클리프행어인가?
 6. AI 1 컨셉·바이블과 모순되는 부분은 없는가?
 7. 각 화의 3분절이 문장 수·구체성 면에서 대본 작업에 충분한가?
+8. 관계가 시즌의 주 동력인가, 아니면 설정/사건이 지배하는가?
+9. EP1에 일상/관계 설정이 70% 이상인가?
+10. 소재를 빼도 같은 갈등이 가능한가? (가능하면 소재 필수성 실패)
 
 ---
 
@@ -84,6 +95,9 @@
 - 화간 훅이 막연함(“다음 화에서 계속” 수준)
 - AI 1 컨셉과의 명백한 불일치
 - 에피소드별 beginning/middle/climax 부재·과소·한 줄 수준
+- EP1에 일상 부재 (캐릭터 호감 형성 불가)
+- 설정이 관계를 지배
+- 세계관 규칙 과다 (미니시리즈에 2개 이상)
 
 ---
 
@@ -104,7 +118,8 @@
     {"name": "character_utilization", "score": 3.0, "weight": 2, "reason": "", "mustFix": false},
     {"name": "hook_placement", "score": 3.0, "weight": 2, "reason": "", "mustFix": false},
     {"name": "story_faithfulness", "score": 3.0, "weight": 2, "reason": "", "mustFix": false},
-    {"name": "production_readiness", "score": 3.0, "weight": 2, "reason": "", "mustFix": false}
+    {"name": "production_readiness", "score": 3.0, "weight": 2, "reason": "", "mustFix": false},
+    {"name": "relationship_balance", "score": 3.0, "weight": 3, "reason": "", "mustFix": false}
   ],
   "criticalIssues": [],
   "topStrengths": ["강점1", "강점2", "강점3"],

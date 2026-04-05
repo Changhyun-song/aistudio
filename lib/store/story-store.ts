@@ -101,6 +101,7 @@ interface StoryStudioState {
   pipelineTargetScore: number;
   pipelineMaxRetries: number;
   pipelineAbort: boolean;
+  pipelineAbortController: AbortController | null;
 
   fetchCharacters: (pid: string) => Promise<void>;
   addCharacter: (pid: string, data: Partial<StoryCharacter>) => Promise<void>;
@@ -131,6 +132,7 @@ interface StoryStudioState {
   clearEvaluation: () => void;
 
   runFullPipeline: (pid: string, inputData: Record<string, unknown>, targetScore?: number, maxRetries?: number, videoProvider?: string) => Promise<void>;
+  resumePipeline: (pid: string, targetScore?: number, maxRetries?: number, videoProvider?: string) => Promise<void>;
   stopPipeline: () => void;
   optimizeStagePrompt: (pid: string, stage: string, generatorOutput: string, evaluation: EvalResult, plannerFeedback: string) => Promise<boolean>;
 
@@ -171,10 +173,15 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
   pipelineTargetScore: 4.0,
   pipelineMaxRetries: 3,
   pipelineAbort: false,
+  pipelineAbortController: null,
 
   clearError: () => set({ error: null }),
   clearEvaluation: () => set({ evaluation: null, plannerInit: null, plannerDecision: null, evalLoop: 0, evalStrategies: [] }),
-  stopPipeline: () => set({ pipelineAbort: true }),
+  stopPipeline: () => {
+    const ctrl = get().pipelineAbortController;
+    if (ctrl) ctrl.abort();
+    set({ pipelineAbort: true });
+  },
 
   // ── Characters ────────────────────────────────────
   fetchCharacters: async (pid) => {
@@ -432,11 +439,44 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
   // Full Auto-Pipeline
   // ══════════════════════════════════════════════════════
   runFullPipeline: async (pid, inputData, targetScore = 4.0, maxRetries = 3, videoProvider = 'seedance_2_0') => {
-    const log = (stage: string, message: string, type: PipelineLog['type'] = 'info') => {
-      set(s => ({ pipelineLogs: [...s.pipelineLogs, { stage, message, timestamp: Date.now(), type }] }));
+    const abortCtrl = new AbortController();
+
+    let _dbRunId: string | null = null;
+    let _logFlushTimer: ReturnType<typeof setTimeout> | null = null;
+    let _logDirty = false;
+
+    const flushLogsToDb = async () => {
+      if (!_dbRunId || !_logDirty) return;
+      _logDirty = false;
+      try {
+        await fetch(`/api/projects/${pid}/pipeline`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'save_logs', runId: _dbRunId, logs: get().pipelineLogs }),
+        });
+      } catch (e) {
+        console.error('[Pipeline] flushLogsToDb failed:', (e as Error).message);
+      }
     };
 
-    const shouldAbort = () => get().pipelineAbort;
+    const scheduleFlush = () => {
+      _logDirty = true;
+      if (_logFlushTimer) clearTimeout(_logFlushTimer);
+      _logFlushTimer = setTimeout(flushLogsToDb, 3000);
+    };
+
+    const log = (stage: string, message: string, type: PipelineLog['type'] = 'info') => {
+      set(s => ({ pipelineLogs: [...s.pipelineLogs, { stage, message, timestamp: Date.now(), type }] }));
+      scheduleFlush();
+    };
+
+    const shouldAbort = () => {
+      if (get().pipelineAbort) {
+        abortCtrl.abort();
+        return true;
+      }
+      return false;
+    };
 
     const buildRevisionBrief = (ev: EvalResult, score: number, target: number): string => {
       const weaknesses = ev.topWeaknesses?.map((w: any) => {
@@ -458,17 +498,56 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
       ].filter(Boolean).join('\n');
     };
 
-    const apiPost = async (url: string, body?: Record<string, unknown>) => {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: body ? JSON.stringify(body) : undefined,
-      });
-      if (!res.ok) {
-        const e = await res.json().catch(() => ({ error: 'Unknown error' }));
-        throw new Error(e.error || `Request failed: ${res.status}`);
+    const API_TIMEOUT_MS = 180_000; // 3 minutes per API call
+
+    const apiPost = async (url: string, body?: Record<string, unknown>, retries = 1): Promise<any> => {
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        const timeoutCtrl = new AbortController();
+        const timeoutId = setTimeout(() => timeoutCtrl.abort(), API_TIMEOUT_MS);
+
+        const combinedSignal = abortCtrl.signal.aborted
+          ? abortCtrl.signal
+          : timeoutCtrl.signal;
+
+        const onParentAbort = () => timeoutCtrl.abort();
+        abortCtrl.signal.addEventListener('abort', onParentAbort, { once: true });
+
+        try {
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: body ? JSON.stringify(body) : undefined,
+            signal: timeoutCtrl.signal,
+          });
+          clearTimeout(timeoutId);
+          abortCtrl.signal.removeEventListener('abort', onParentAbort);
+
+          if (!res.ok) {
+            const e = await res.json().catch(() => ({ error: 'Unknown error' }));
+            const detail = e.error || `Request failed`;
+            throw new Error(`[HTTP ${res.status}] ${detail}`);
+          }
+          return await res.json();
+        } catch (err) {
+          clearTimeout(timeoutId);
+          abortCtrl.signal.removeEventListener('abort', onParentAbort);
+
+          if (abortCtrl.signal.aborted) throw err;
+
+          const isTimeout = (err as Error).name === 'AbortError';
+          const msg = isTimeout
+            ? `API 타임아웃 (${API_TIMEOUT_MS / 1000}초 초과): ${url}`
+            : (err as Error).message;
+
+          if (attempt < retries) {
+            log('재시도', `${msg} — ${attempt + 2}/${retries + 1} 시도 중... (${Math.round(API_TIMEOUT_MS / 1000)}초 후)`, 'warn');
+            await new Promise(r => setTimeout(r, 5000));
+            continue;
+          }
+          throw new Error(msg);
+        }
       }
-      return res.json();
+      throw new Error('apiPost: unexpected exit');
     };
 
     const evaluate = async (taskType: EvalTaskType, epNum?: number): Promise<EvalResult> => {
@@ -555,15 +634,17 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
 
     const pipelineApi = async (action: string, extra: Record<string, unknown> = {}) => {
       try {
-        await fetch(`/api/projects/${pid}/pipeline`, {
+        const res = await fetch(`/api/projects/${pid}/pipeline`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action, ...extra }),
         });
-      } catch { /* best-effort DB persistence */ }
+        if (!res.ok) console.error(`[Pipeline] pipelineApi(${action}) HTTP ${res.status}`);
+      } catch (e) {
+        console.error(`[Pipeline] pipelineApi(${action}) failed:`, (e as Error).message);
+      }
     };
 
-    let dbRunId: string | null = null;
     try {
       const res = await fetch(`/api/projects/${pid}/pipeline`, {
         method: 'POST',
@@ -571,19 +652,23 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
         body: JSON.stringify({ action: 'create', pipelineType: 'story_full', targetScore, maxRetries, currentStage: 'ai1_concept', currentStageLabel: 'AI 1: 스토리 컨셉' }),
       });
       const run = await res.json();
-      dbRunId = run.id || null;
-    } catch { /* ignore */ }
+      _dbRunId = run.id || null;
+      if (!_dbRunId) console.error('[Pipeline] Failed to create pipeline run — no ID returned');
+    } catch (e) {
+      console.error('[Pipeline] Failed to create pipeline run:', (e as Error).message);
+    }
 
     const syncStage = (stage: string, label: string, pct: number) => {
-      if (dbRunId) pipelineApi('update_stage', { runId: dbRunId, stage, stageLabel: label, progressPct: pct });
+      if (_dbRunId) pipelineApi('update_stage', { runId: _dbRunId, stage, stageLabel: label, progressPct: pct });
     };
 
     set({
       pipelineRunning: true,
-      pipelineRunId: dbRunId,
+      pipelineRunId: _dbRunId,
       pipelineStage: 'ai1_concept',
       pipelineLogs: [],
       pipelineAbort: false,
+      pipelineAbortController: abortCtrl,
       pipelineTargetScore: targetScore,
       pipelineMaxRetries: maxRetries,
       error: null,
@@ -774,20 +859,38 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
       set({ pipelineStage: 'ai2_scripts' });
       syncStage('ai2_scripts', `AI 2: 에피소드 대본 생성 (0/${epCount})`, 45);
 
+      // Heartbeat: periodically log "still waiting" so user knows it's alive
+      let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+      const startHeartbeat = (label: string) => {
+        stopHeartbeat();
+        let elapsed = 0;
+        heartbeatTimer = setInterval(() => {
+          elapsed += 30;
+          log('AI 2', `⏳ ${label} — 응답 대기 중... (${elapsed}초 경과)`, 'info');
+          syncStage('ai2_scripts', `AI 2: ${label} — 응답 대기 중 (${elapsed}s)`, 45 + Math.round((get().currentEpisode / epCount) * 20));
+        }, 30_000);
+      };
+      const stopHeartbeat = () => {
+        if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+      };
+
       for (let ep = 1; ep <= epCount; ep++) {
-        if (shouldAbort()) throw new Error('Pipeline stopped by user');
+        if (shouldAbort()) { stopHeartbeat(); throw new Error('Pipeline stopped by user'); }
 
         set({ currentEpisode: ep, generating: 'script' });
         syncStage('ai2_scripts', `AI 2: 에피소드 대본 생성 (${ep}/${epCount})`, 45 + Math.round((ep / epCount) * 20));
         log('AI 2', `EP${ep}/${epCount} 대본 생성 중...`, 'info');
+        startHeartbeat(`EP${ep}/${epCount} 대본 생성`);
         let scriptResult;
         try {
           scriptResult = await apiPost(`/api/projects/${pid}/story/episodes/${ep}/script`);
         } catch (scriptErr) {
+          stopHeartbeat();
           log('AI 2', `EP${ep} 대본 생성 실패: ${(scriptErr as Error).message}. 스킵합니다.`, 'warn');
           set({ generating: null });
           continue;
         }
+        stopHeartbeat();
         set({ script: scriptResult, generating: null });
         log('AI 2', `EP${ep} 대본 완료`, 'success');
 
@@ -797,7 +900,9 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
           if (shouldAbort()) throw new Error('Pipeline stopped by user');
 
           log('AI 2', `EP${ep} 대본 평가 ${attempt}/${maxRetries}...`, 'info');
+          startHeartbeat(`EP${ep} 대본 평가 (${attempt}/${maxRetries})`);
           const ev = await evaluate('script', ep);
+          stopHeartbeat();
           const score = ev.weightedScore || ev.overallScore || 0;
           if (score > scriptBestScore) {
             scriptBestScore = score;
@@ -830,10 +935,13 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
             log('AI 2', ok ? '보충 규칙 업데이트 완료' : '보충 규칙 업데이트 실패', ok ? 'success' : 'warn');
           }
           log('AI 2', `EP${ep} 대본 재생성 중... attempt ${attempt}/${maxRetries}`, 'info');
+          startHeartbeat(`EP${ep} 대본 재생성 (${attempt}/${maxRetries})`);
           try {
             const reScript = await apiPost(`/api/projects/${pid}/story/episodes/${ep}/script`, { revisionFeedback: scriptBrief });
+            stopHeartbeat();
             set({ script: reScript, generating: null });
           } catch (reScriptErr) {
+            stopHeartbeat();
             log('AI 2', `EP${ep} 대본 재생성 실패. 최고 버전 유지.`, 'warn');
             set({ script: bestScript, generating: null });
           }
@@ -842,6 +950,7 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
       }
 
       // ════════════ AI 3: Clips per Episode ════════════
+      stopHeartbeat(); // clean up any leftover from AI2
       set({ pipelineStage: 'ai3_clips' });
       syncStage('ai3_clips', `AI 3: 클립 생성 (0/${epCount})`, 70);
 
@@ -965,34 +1074,80 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
 
       // ════════════ Complete ════════════
       log('완료', `전체 파이프라인 완료! AI1→AI2→AI3 (${epCount}화) 모두 생성 및 검증됨.`, 'success');
-      set({ pipelineStage: 'complete', pipelineRunning: false, generating: null });
-      if (dbRunId) {
-        pipelineApi('update_stage', { runId: dbRunId, stage: 'complete', stageLabel: '완료', progressPct: 100 });
-        pipelineApi('update_status', { runId: dbRunId, status: 'completed' });
+      set({ pipelineStage: 'complete', pipelineRunning: false, pipelineAbortController: null, generating: null });
+
+      if (_logFlushTimer) clearTimeout(_logFlushTimer);
+      const completeLogs = get().pipelineLogs;
+      if (_dbRunId) {
+        await pipelineApi('update_stage', { runId: _dbRunId, stage: 'complete', stageLabel: '완료', progressPct: 100 });
+        await pipelineApi('update_status', { runId: _dbRunId, status: 'completed' });
+        await pipelineApi('save_logs', { runId: _dbRunId, logs: completeLogs });
       }
       try {
         await fetch(`/api/projects/${pid}/pipeline-logs`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ logs: get().pipelineLogs, stage: 'complete' }),
+          body: JSON.stringify({ logs: completeLogs, stage: 'complete' }),
         });
+      } catch (e) { console.error('[Pipeline] pipeline-logs file save failed:', (e as Error).message); }
+      try {
+        const consRes = await fetch('/api/learning', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'consolidate' }),
+        });
+        if (consRes.ok) {
+          const { results } = await consRes.json();
+          if (results?.length > 0) {
+            for (const r of results) {
+              log('학습', `${r.stage} 글로벌 규칙 ${r.consolidatedRules}개를 원본 프롬프트에 통합 완료`, 'success');
+            }
+          }
+        }
       } catch { /* non-critical */ }
 
     } catch (err) {
-      const msg = (err as Error).message;
-      log('오류', msg, 'error');
-      set({ pipelineStage: 'failed', pipelineRunning: false, generating: null, error: msg });
-      if (dbRunId) {
-        const status = msg.includes('stopped by user') ? 'aborted' : 'failed';
-        pipelineApi('update_status', { runId: dbRunId, status, errorMessage: msg });
+      const isAbort = (err as Error).name === 'AbortError' || get().pipelineAbort;
+      const failedStage = get().pipelineStage;
+      const failedStageLabel = get().generating ? `${get().generating} 생성` : failedStage;
+      const rawMsg = (err as Error).message;
+      const msg = isAbort
+        ? '사용자가 파이프라인을 중지했습니다.'
+        : `${failedStageLabel} 실패 — ${rawMsg}`;
+      log(isAbort ? '중지' : '오류', msg, isAbort ? 'info' : 'error');
+      set({ pipelineStage: isAbort ? 'idle' : 'failed', pipelineRunning: false, pipelineAbortController: null, generating: null, error: isAbort ? null : msg });
+
+      if (_logFlushTimer) clearTimeout(_logFlushTimer);
+      const currentLogs = get().pipelineLogs;
+      const status = isAbort ? 'aborted' : 'failed';
+
+      if (_dbRunId) {
+        try {
+          await fetch(`/api/projects/${pid}/pipeline`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'update_status', runId: _dbRunId, status, errorMessage: msg }),
+          });
+        } catch (e) { console.error('[Pipeline] update_status on failure:', (e as Error).message); }
+
+        try {
+          await fetch(`/api/projects/${pid}/pipeline`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'save_logs', runId: _dbRunId, logs: currentLogs }),
+          });
+        } catch (e) { console.error('[Pipeline] save_logs on failure:', (e as Error).message); }
+      } else {
+        console.error('[Pipeline] No dbRunId — logs cannot be saved to DB. Logs count:', currentLogs.length);
       }
+
       try {
         await fetch(`/api/projects/${pid}/pipeline-logs`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ logs: get().pipelineLogs, stage: 'failed' }),
+          body: JSON.stringify({ logs: currentLogs, stage: status }),
         });
-      } catch { /* non-critical */ }
+      } catch (e) { console.error('[Pipeline] pipeline-logs file save on failure:', (e as Error).message); }
     }
   },
 
@@ -1077,6 +1232,77 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
   },
 
   // ══════════════════════════════════════════════════════
+  // Resume Pipeline from failure point
+  // ══════════════════════════════════════════════════════
+  resumePipeline: async (pid, targetScore = 3.7, maxRetries = 3, videoProvider = 'seedance_2_0') => {
+    try {
+      const pipeRes = await fetch(`/api/projects/${pid}/pipeline`);
+      const pipeData = await pipeRes.json();
+      const latest = pipeData.latest;
+      if (!latest || latest.status === 'running') {
+        set({ error: '이어서 실행할 파이프라인이 없거나 이미 실행 중입니다.' });
+        return;
+      }
+
+      const failedStage = latest.current_stage || 'ai1_concept';
+
+      const hasConcept = !!get().concept;
+      const hasBible = !!get().bible;
+      const hasEpisodes = get().episodes.length > 0;
+
+      if (!hasConcept) {
+        await get().fetchConcept(pid);
+      }
+      if (!get().concept) {
+        set({ error: 'AI 1 컨셉이 없습니다. 처음부터 다시 실행해주세요.' });
+        return;
+      }
+
+      let resumeFrom: 'bible' | 'season' | 'scripts' | 'clips' = 'bible';
+
+      if (failedStage.startsWith('ai3') || failedStage === 'season_coherence') {
+        resumeFrom = 'clips';
+      } else if (failedStage.startsWith('ai2_script')) {
+        resumeFrom = 'scripts';
+      } else if (failedStage.startsWith('ai2_season') || failedStage.startsWith('ai2_eval')) {
+        resumeFrom = 'season';
+      } else if (failedStage.startsWith('ai2')) {
+        if (!hasBible) resumeFrom = 'bible';
+        else if (!hasEpisodes) resumeFrom = 'season';
+        else resumeFrom = 'scripts';
+      }
+
+      if (resumeFrom === 'bible') {
+        if (!hasBible) await get().fetchBible(pid);
+        if (!get().bible) {
+          await get().runStagePipeline(pid, 'season', undefined, targetScore, maxRetries, videoProvider);
+          return;
+        }
+        resumeFrom = 'season';
+      }
+
+      if (resumeFrom === 'season') {
+        if (!hasEpisodes) await get().fetchSeason(pid);
+        await get().runStagePipeline(pid, 'season', undefined, targetScore, maxRetries, videoProvider);
+        return;
+      }
+
+      if (resumeFrom === 'scripts') {
+        const epCount = get().episodes.length || 1;
+        await get().runStagePipeline(pid, 'script', 1, targetScore, maxRetries, videoProvider);
+        return;
+      }
+
+      if (resumeFrom === 'clips') {
+        await get().runStagePipeline(pid, 'clips', 1, targetScore, maxRetries, videoProvider);
+        return;
+      }
+    } catch (err) {
+      set({ error: `이어서 실행 실패: ${(err as Error).message}` });
+    }
+  },
+
+  // ══════════════════════════════════════════════════════
   // Stage Mini-Pipeline
   // ══════════════════════════════════════════════════════
   runStagePipeline: async (
@@ -1087,17 +1313,54 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
     maxRetries: number = 5,
     videoProvider: string = 'seedance_2_0',
   ) => {
+    const stageAbortCtrl = new AbortController();
+    const initialStage = stage === 'season' ? 'ai2_season' : stage === 'script' ? 'ai2_scripts' : 'ai3_clips';
     set({
       pipelineRunning: true,
-      pipelineStage: stage === 'season' ? 'ai2_season' : stage === 'script' ? 'ai2_scripts' : 'ai3_clips',
+      pipelineStage: initialStage,
       pipelineLogs: [],
       pipelineAbort: false,
+      pipelineAbortController: stageAbortCtrl,
     });
+
+    let dbRunId: string | null = null;
+    try {
+      const createRes = await fetch(`/api/projects/${pid}/pipeline`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'create', pipelineType: `stage_${stage}`, targetScore, maxRetries, currentStage: initialStage }),
+      });
+      if (createRes.ok) {
+        const runData = await createRes.json();
+        dbRunId = runData.id;
+      }
+    } catch { /* best-effort */ }
+
+    let _stageLogDirty = false;
+    let _stageLogTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const flushStageLogs = async () => {
+      if (!dbRunId || !_stageLogDirty) return;
+      _stageLogDirty = false;
+      try {
+        await fetch(`/api/projects/${pid}/pipeline`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'save_logs', runId: dbRunId, logs: get().pipelineLogs }),
+        });
+      } catch (e) { console.error('[StagePipeline] flushLogs failed:', (e as Error).message); }
+    };
 
     const log = (stg: string, message: string, type: PipelineLog['type'] = 'info') => {
       set(s => ({ pipelineLogs: [...s.pipelineLogs, { stage: stg, message, timestamp: Date.now(), type }] }));
+      _stageLogDirty = true;
+      if (_stageLogTimer) clearTimeout(_stageLogTimer);
+      _stageLogTimer = setTimeout(flushStageLogs, 3000);
     };
-    const shouldAbort = () => get().pipelineAbort;
+    const shouldAbort = () => {
+      if (get().pipelineAbort) { stageAbortCtrl.abort(); return true; }
+      return false;
+    };
+    const sig = stageAbortCtrl.signal;
     const aiLabel = stage === 'clips' ? 'AI 3' : 'AI 2';
 
     try {
@@ -1108,14 +1371,14 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
       if (!hasData) {
         log(aiLabel, `${stage} 초기 생성 중...`, 'info');
         if (stage === 'season') {
-          const r = await fetch(`/api/projects/${pid}/story/season`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+          const r = await fetch(`/api/projects/${pid}/story/season`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', signal: sig });
           const seasonData = await r.json();
           set({ episodes: Array.isArray(seasonData) ? seasonData : [] });
         } else if (stage === 'script' && epNum) {
-          const r = await fetch(`/api/projects/${pid}/story/episodes/${epNum}/script`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+          const r = await fetch(`/api/projects/${pid}/story/episodes/${epNum}/script`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', signal: sig });
           set({ script: await r.json() });
         } else if (stage === 'clips' && epNum) {
-          const r = await fetch(`/api/projects/${pid}/story/episodes/${epNum}/clips`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ density: 'cinematic_detail', videoProvider }) });
+          const r = await fetch(`/api/projects/${pid}/story/episodes/${epNum}/clips`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ density: 'cinematic_detail', videoProvider }), signal: sig });
           const d = await r.json(); set({ clips: d.clips || [], frames: d.frames || [], timeline: d.timeline || '' });
         }
         log(aiLabel, `${stage} 초기 생성 완료`, 'success');
@@ -1130,7 +1393,7 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
         log(aiLabel, `평가 ${attempt}/${maxRetries}...`, 'info');
         const evalRes = await fetch(`/api/projects/${pid}/story/evaluate`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ taskType, episodeNumber: epNum }),
+          body: JSON.stringify({ taskType, episodeNumber: epNum }), signal: sig,
         });
         const ev = await evalRes.json();
         set({ evaluation: ev });
@@ -1147,7 +1410,7 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
         log(aiLabel, `Planner 분석 중...`, 'info');
         const planRes = await fetch(`/api/projects/${pid}/story/plan`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'interpret', taskType, evaluation: ev, loop: attempt, previousStrategies: [] }),
+          body: JSON.stringify({ action: 'interpret', taskType, evaluation: ev, loop: attempt, previousStrategies: [] }), signal: sig,
         });
         const plan = await planRes.json();
         log(aiLabel, `Planner 결정: ${plan.decision}`, 'info');
@@ -1161,24 +1424,50 @@ export const useStoryStore = create<StoryStudioState>((set, get) => ({
 
         log(aiLabel, `재생성 중... attempt ${attempt}/${maxRetries}`, 'info');
         if (stage === 'season') {
-          const r = await fetch(`/api/projects/${pid}/story/season`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revisionFeedback: feedback }) });
+          const r = await fetch(`/api/projects/${pid}/story/season`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revisionFeedback: feedback }), signal: sig });
           const seasonData = await r.json();
           set({ episodes: Array.isArray(seasonData) ? seasonData : [] });
         } else if (stage === 'script' && epNum) {
-          const r = await fetch(`/api/projects/${pid}/story/episodes/${epNum}/script`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revisionFeedback: feedback }) });
+          const r = await fetch(`/api/projects/${pid}/story/episodes/${epNum}/script`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revisionFeedback: feedback }), signal: sig });
           set({ script: await r.json() });
         } else if (stage === 'clips' && epNum) {
-          const r = await fetch(`/api/projects/${pid}/story/episodes/${epNum}/clips`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ density: 'cinematic_detail', videoProvider, revisionFeedback: feedback }) });
+          const r = await fetch(`/api/projects/${pid}/story/episodes/${epNum}/clips`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ density: 'cinematic_detail', videoProvider, revisionFeedback: feedback }), signal: sig });
           const d = await r.json(); set({ clips: d.clips || [], frames: d.frames || [], timeline: d.timeline || '' });
         }
         log(aiLabel, `재생성 완료`, 'success');
       }
 
-      set({ pipelineRunning: false, pipelineStage: 'complete' });
+      set({ pipelineRunning: false, pipelineStage: 'complete', pipelineAbortController: null });
       log(aiLabel, `${stage} 미니 파이프라인 완료! 최고: ${bestScore.toFixed(1)}`, 'success');
+      if (_stageLogTimer) clearTimeout(_stageLogTimer);
+      if (dbRunId) {
+        try {
+          await fetch(`/api/projects/${pid}/pipeline`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'update_status', runId: dbRunId, status: 'completed' }) });
+        } catch (e) { console.error('[StagePipeline] update_status on success:', (e as Error).message); }
+        try {
+          await fetch(`/api/projects/${pid}/pipeline`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'save_logs', runId: dbRunId, logs: get().pipelineLogs }) });
+        } catch (e) { console.error('[StagePipeline] save_logs on success:', (e as Error).message); }
+      }
     } catch (err) {
-      set({ pipelineRunning: false, pipelineStage: 'failed', error: (err as Error).message });
-      log('오류', (err as Error).message, 'error');
+      const isAbort = (err as Error).name === 'AbortError' || get().pipelineAbort;
+      const failedLabel = get().pipelineStage;
+      const rawMsg = (err as Error).message;
+      const msg = isAbort ? '사용자가 파이프라인을 중지했습니다.' : `${failedLabel} 실패 — ${rawMsg}`;
+      log(isAbort ? '중지' : '오류', msg, isAbort ? 'info' : 'error');
+      set({ pipelineRunning: false, pipelineStage: isAbort ? 'idle' : 'failed', pipelineAbortController: null, error: isAbort ? null : msg });
+      if (_stageLogTimer) clearTimeout(_stageLogTimer);
+      const failLogs = get().pipelineLogs;
+      if (dbRunId) {
+        const status = isAbort ? 'aborted' : 'failed';
+        try {
+          await fetch(`/api/projects/${pid}/pipeline`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'update_status', runId: dbRunId, status, errorMessage: msg }) });
+        } catch (e) { console.error('[StagePipeline] update_status on failure:', (e as Error).message); }
+        try {
+          await fetch(`/api/projects/${pid}/pipeline`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'save_logs', runId: dbRunId, logs: failLogs }) });
+        } catch (e) { console.error('[StagePipeline] save_logs on failure:', (e as Error).message); }
+      } else {
+        console.error('[StagePipeline] No dbRunId — logs cannot be saved. Count:', failLogs.length);
+      }
     }
   },
 }));

@@ -223,7 +223,7 @@ ${evalContent}
 
   for (let i = 0; i < EVAL_ROUNDS; i++) {
     try {
-      const raw = await provider.chat(sysPrompt, userMsg, { maxTokens: 6000, temperature: 0, model: MODEL_EVALUATOR });
+      const raw = await provider.chat(sysPrompt, userMsg, { maxTokens: 6000, temperature: 0, model: MODEL_EVALUATOR, trackingContext: { projectId: '', stage: `eval_${taskType}`, role: 'evaluator' } });
       const parsed = JSON.parse(extractJsonBlock(raw)) as EvalResult;
       normalizeScoresTo5(parsed);
       if (parsed.criteria?.length) {
@@ -322,6 +322,9 @@ export interface SeasonCoherenceResult {
   pacingBalance: number;
   toneConsistency: number;
   foreshadowingPayoff: number;
+  relationshipCentricity: number;
+  dailyLifeCrisisBalance: number;
+  naturalness: number;
   issues: { episode: number; issue: string; severity: 'critical' | 'major' | 'minor' }[];
   strengths: string[];
   suggestions: string[];
@@ -359,6 +362,9 @@ ${episodeSummaries}
 3. **페이싱 균형**: 긴장-이완 리듬이 시즌 전체에서 균형 잡혀있는가? 중반 처짐이 없는가?
 4. **톤 일관성**: 시즌 전체의 분위기가 일관되게 유지되는가?
 5. **복선-보상 구조**: 앞선 에피소드의 설정이 이후 에피소드에서 의미있게 활용되는가?
+6. **관계 중심성**: 인물 간 관계의 변화가 플롯을 이끄는 핵심 동력인가? 관계선이 에피소드를 넘어 유기적으로 발전하는가?
+7. **일상-위기 균형**: 일상적 소소한 장면과 극적 위기 장면이 적절히 교차하는가? 일상 장면이 캐릭터 깊이를 드러내는가?
+8. **자연스러움**: 대사·행동·전개가 "드라마적 과장" 없이 현실적으로 느껴지는가? 감정이 갑자기 비약하거나 인위적 갈등이 삽입되지 않았는가?
 
 ## 규칙
 - 점수는 1.0~5.0 (엄격)
@@ -373,6 +379,9 @@ ${episodeSummaries}
   "pacingBalance": 3.5,
   "toneConsistency": 3.5,
   "foreshadowingPayoff": 3.5,
+  "relationshipCentricity": 3.5,
+  "dailyLifeCrisisBalance": 3.5,
+  "naturalness": 3.5,
   "issues": [
     {"episode": 5, "issue": "구체적 문제", "severity": "major"}
   ],
@@ -385,10 +394,10 @@ ${episodeSummaries}
   const sysPrompt = getEvaluatorPrompt('season');
 
   try {
-    const raw = await provider.chat(sysPrompt, userMsg, { maxTokens: 4000, temperature: 0, model: MODEL_EVALUATOR });
+    const raw = await provider.chat(sysPrompt, userMsg, { maxTokens: 4000, temperature: 0, model: MODEL_EVALUATOR, trackingContext: { projectId: '', stage: 'eval_season_coherence', role: 'evaluator' } });
     const parsed = JSON.parse(extractJsonBlock(raw)) as SeasonCoherenceResult;
 
-    for (const key of ['overallScore', 'characterArcConsistency', 'plotThreadResolution', 'pacingBalance', 'toneConsistency', 'foreshadowingPayoff'] as const) {
+    for (const key of ['overallScore', 'characterArcConsistency', 'plotThreadResolution', 'pacingBalance', 'toneConsistency', 'foreshadowingPayoff', 'relationshipCentricity', 'dailyLifeCrisisBalance', 'naturalness'] as const) {
       if (parsed[key] > 5) parsed[key] = Math.round((parsed[key] * 5 / 10) * 100) / 100;
     }
 
@@ -401,6 +410,9 @@ ${episodeSummaries}
       pacingBalance: 0,
       toneConsistency: 0,
       foreshadowingPayoff: 0,
+      relationshipCentricity: 0,
+      dailyLifeCrisisBalance: 0,
+      naturalness: 0,
       issues: [],
       strengths: [],
       suggestions: ['Coherence evaluation failed'],

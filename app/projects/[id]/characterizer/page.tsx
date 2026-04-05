@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
-import type { CharacterizerShot, SelectionState } from '@/types';
+import type { CharacterizerShot, SelectionState, StoryCharacter, CharacterVisualPrompt } from '@/types';
 import { toast } from 'sonner';
 
 const SELECTION_CONFIG: Record<SelectionState, { bg: string; label: string }> = {
@@ -29,8 +29,9 @@ export default function CharacterizerPage() {
   const { currentProject } = useAppStore();
   const {
     config, anchors, shots, geminiConfigured, loading, generatingShots, error,
-    fetchConfig, saveConfig, generateAnchors, generateAllShots, regenerateShot,
-    fetchShots, updateShotSelection, clearError,
+    storyCharacters, visualPrompts, activeCharacterId,
+    fetchConfig, saveConfig, syncCharacter, generateAnchors, generateAllShots,
+    regenerateShot, fetchShots, updateShotSelection, clearError,
   } = useCharacterizerStore();
 
   const [section, setSection] = useState<Section>('setup');
@@ -43,6 +44,7 @@ export default function CharacterizerPage() {
   const [schoolStyle, setSchoolStyle] = useState('modest Korean school uniform, blazer, white shirt, tie');
   const [afterSchoolStyle, setAfterSchoolStyle] = useState('');
   const [toneKeywords, setToneKeywords] = useState('');
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     fetchConfig(projectId);
@@ -64,6 +66,29 @@ export default function CharacterizerPage() {
     if (anchors.length > 0 && !shots.length) setSection('anchors');
     if (shots.length > 0) setSection('shots');
   }, [anchors.length, shots.length]);
+
+  const activeVisualPrompt: CharacterVisualPrompt | undefined = activeCharacterId
+    ? visualPrompts.find(vp => vp.character_id === activeCharacterId)
+    : undefined;
+
+  const activeStoryChar: StoryCharacter | undefined = activeCharacterId
+    ? storyCharacters.find(c => c.id === activeCharacterId)
+    : undefined;
+
+  const handleCharacterSelect = async (charId: string) => {
+    await syncCharacter(projectId, charId);
+  };
+
+  const handleCopyPrompt = async (prompt: string) => {
+    try {
+      await navigator.clipboard.writeText(prompt);
+      setCopied(true);
+      toast.success('프롬프트 복사됨');
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error('복사 실패');
+    }
+  };
 
   const handleBaseImageUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -149,6 +174,8 @@ export default function CharacterizerPage() {
     return s.selection_state === filter;
   });
 
+  const hasStoryChars = storyCharacters.length > 0;
+
   return (
     <div className="space-y-6">
       {/* Section Tabs */}
@@ -174,72 +201,195 @@ export default function CharacterizerPage() {
 
       {/* ── Section 1: Setup ──────────────────────────── */}
       {section === 'setup' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Card>
-            <CardContent className="p-6">
-              <h3 className="text-lg font-semibold mb-4">기준 이미지</h3>
-              {config?.base_image_path ? (
-                <div className="space-y-3">
-                  <div className="aspect-[2/3] bg-muted rounded-lg overflow-hidden max-w-xs">
-                    <ImageHoverZoom src={config.base_image_path} alt="Base" className="w-full h-full object-cover" />
-                  </div>
-                  <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>이미지 변경</Button>
+        <div className="space-y-6">
+          {/* Character Selector from Story Studio */}
+          {hasStoryChars && (
+            <Card className="border-primary/30 bg-primary/5">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-sm font-semibold">Story Studio 캐릭터</span>
+                  <Badge variant="secondary" className="text-[10px]">자동 연결</Badge>
                 </div>
-              ) : (
-                <div
-                  onClick={() => fileInputRef.current?.click()}
-                  className="aspect-[2/3] max-w-xs rounded-lg border-2 border-dashed border-border hover:border-primary/50 flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors"
-                >
-                  <svg className="w-10 h-10 text-muted-foreground/50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
-                  </svg>
-                  <span className="text-sm text-muted-foreground">기준 캐릭터 이미지 업로드</span>
-                  <span className="text-xs text-muted-foreground/60">PNG, JPG</span>
+                <div className="flex gap-2 flex-wrap">
+                  {storyCharacters.map(char => {
+                    const isActive = char.id === activeCharacterId;
+                    const hasPrompt = visualPrompts.some(vp => vp.character_id === char.id && vp.mj_base_prompt);
+                    const isMain = char.role?.includes('메인') || char.role?.includes('주인공');
+                    return (
+                      <button
+                        key={char.id}
+                        onClick={() => handleCharacterSelect(char.id)}
+                        className={cn(
+                          'px-3 py-2 rounded-lg border text-left transition-all text-sm',
+                          isActive
+                            ? 'border-primary bg-primary/10 ring-1 ring-primary'
+                            : 'border-border hover:border-primary/50 bg-card',
+                        )}
+                      >
+                        <div className="font-medium flex items-center gap-1.5">
+                          {char.name}
+                          {isMain && <Badge variant="default" className="text-[9px] h-4 px-1">메인</Badge>}
+                          {hasPrompt && <span className="text-green-500 text-xs">✓</span>}
+                        </div>
+                        <div className="text-[10px] text-muted-foreground mt-0.5 max-w-[200px] truncate">
+                          {char.role}
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
-              )}
-              <input ref={fileInputRef} type="file" className="hidden" accept="image/*" onChange={handleBaseImageUpload} />
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          )}
 
-          <Card>
-            <CardContent className="p-6 space-y-4">
-              <h3 className="text-lg font-semibold">캐릭터 설정 (선택)</h3>
-              <p className="text-xs text-muted-foreground">비워두면 이미지만으로 생성합니다</p>
-              <div>
-                <Label className="text-xs">캐릭터 이름</Label>
-                <Input value={characterName} onChange={e => setCharacterName(e.target.value)} placeholder="예: 하은" className="mt-1" />
-              </div>
-              <div>
-                <Label className="text-xs">시그니처 아이템</Label>
-                <Input value={signatureItem} onChange={e => setSignatureItem(e.target.value)} placeholder="예: fluffy bear sleep mask on head" className="mt-1" />
-              </div>
-              <div>
-                <Label className="text-xs">시그니처 컬러</Label>
-                <Input value={signatureColor} onChange={e => setSignatureColor(e.target.value)} placeholder="예: pastel lavender" className="mt-1" />
-              </div>
-              <div>
-                <Label className="text-xs">교복 스타일</Label>
-                <Input value={schoolStyle} onChange={e => setSchoolStyle(e.target.value)} className="mt-1" />
-              </div>
-              <div>
-                <Label className="text-xs">방과 후 스타일</Label>
-                <Input value={afterSchoolStyle} onChange={e => setAfterSchoolStyle(e.target.value)} placeholder="예: oversized hoodie, jeans" className="mt-1" />
-              </div>
-              <div>
-                <Label className="text-xs">톤 키워드</Label>
-                <Input value={toneKeywords} onChange={e => setToneKeywords(e.target.value)} placeholder="예: dreamy, soft, warm" className="mt-1" />
-              </div>
-              <div className="flex gap-2 pt-2">
-                <Button onClick={handleSaveConfig} variant="outline" disabled={loading}>저장</Button>
-                <Button onClick={handleGenerateAnchors} disabled={!config?.base_image_path || loading || !geminiConfigured}>
-                  {loading ? 'Anchor 생성 중...' : '🔗 Anchor 4장 생성'}
-                </Button>
-              </div>
-              {!geminiConfigured && (
-                <p className="text-xs text-red-400">GEMINI_API_KEY가 설정되지 않았습니다. .env.local에 추가하세요.</p>
-              )}
-            </CardContent>
-          </Card>
+          {/* Base Portrait Prompt (from AI) */}
+          {activeVisualPrompt?.mj_base_prompt && (
+            <Card className="border-blue-500/30 bg-blue-500/5">
+              <CardContent className="p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold">Base Portrait 프롬프트</span>
+                    <Badge variant="outline" className="text-[10px] border-blue-500/50 text-blue-400">MJ 복사용</Badge>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant={copied ? 'default' : 'outline'}
+                    onClick={() => handleCopyPrompt(activeVisualPrompt.mj_base_prompt)}
+                    className="h-7 text-xs"
+                  >
+                    {copied ? '✓ 복사됨' : '📋 복사'}
+                  </Button>
+                </div>
+                <div className="bg-black/30 rounded-lg p-3 text-xs text-muted-foreground font-mono leading-relaxed max-h-32 overflow-y-auto">
+                  {activeVisualPrompt.mj_base_prompt}
+                </div>
+                {activeVisualPrompt.visual_brief && (
+                  <p className="text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground">비주얼 요약:</span> {activeVisualPrompt.visual_brief}
+                  </p>
+                )}
+                <div className="flex items-center gap-2 text-[11px] text-muted-foreground bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-2.5">
+                  <span>💡</span>
+                  <span>위 프롬프트를 복사해서 Midjourney에서 이미지를 생성한 뒤, 아래에서 업로드하세요.</span>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Base Image Upload */}
+            <Card>
+              <CardContent className="p-6">
+                <h3 className="text-lg font-semibold mb-1">기준 이미지</h3>
+                <p className="text-xs text-muted-foreground mb-4">
+                  {hasStoryChars
+                    ? 'MJ에서 생성한 캐릭터 이미지를 업로드하세요'
+                    : '캐릭터 기준 이미지를 업로드하세요'}
+                </p>
+                {config?.base_image_path ? (
+                  <div className="space-y-3">
+                    <div className="aspect-[2/3] bg-muted rounded-lg overflow-hidden max-w-xs">
+                      <ImageHoverZoom src={config.base_image_path} alt="Base" className="w-full h-full object-cover" />
+                    </div>
+                    <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>이미지 변경</Button>
+                  </div>
+                ) : (
+                  <div
+                    onClick={() => fileInputRef.current?.click()}
+                    className="aspect-[2/3] max-w-xs rounded-lg border-2 border-dashed border-border hover:border-primary/50 flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors"
+                  >
+                    <svg className="w-10 h-10 text-muted-foreground/50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+                    </svg>
+                    <span className="text-sm text-muted-foreground">
+                      {activeVisualPrompt?.mj_base_prompt
+                        ? 'MJ에서 생성한 이미지 업로드'
+                        : '기준 캐릭터 이미지 업로드'}
+                    </span>
+                    <span className="text-xs text-muted-foreground/60">PNG, JPG</span>
+                  </div>
+                )}
+                <input ref={fileInputRef} type="file" className="hidden" accept="image/*" onChange={handleBaseImageUpload} />
+              </CardContent>
+            </Card>
+
+            {/* Character Settings */}
+            <Card>
+              <CardContent className="p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-semibold">캐릭터 설정</h3>
+                  {hasStoryChars && (
+                    <Badge variant="secondary" className="text-[10px]">Story Studio에서 자동 채움</Badge>
+                  )}
+                </div>
+                {!hasStoryChars && (
+                  <p className="text-xs text-muted-foreground">비워두면 이미지만으로 생성합니다</p>
+                )}
+                <div>
+                  <Label className="text-xs">캐릭터 이름</Label>
+                  <Input value={characterName} onChange={e => setCharacterName(e.target.value)} placeholder="예: 하은" className="mt-1" />
+                </div>
+                <div>
+                  <Label className="text-xs">시그니처 아이템</Label>
+                  <Input value={signatureItem} onChange={e => setSignatureItem(e.target.value)} placeholder="예: fluffy bear sleep mask on head" className="mt-1" />
+                </div>
+                <div>
+                  <Label className="text-xs">시그니처 컬러</Label>
+                  <Input value={signatureColor} onChange={e => setSignatureColor(e.target.value)} placeholder="예: pastel lavender" className="mt-1" />
+                </div>
+                <div>
+                  <Label className="text-xs">교복 스타일</Label>
+                  <Input value={schoolStyle} onChange={e => setSchoolStyle(e.target.value)} className="mt-1" />
+                </div>
+                <div>
+                  <Label className="text-xs">방과 후 스타일</Label>
+                  <Input value={afterSchoolStyle} onChange={e => setAfterSchoolStyle(e.target.value)} placeholder="예: oversized hoodie, jeans" className="mt-1" />
+                </div>
+                <div>
+                  <Label className="text-xs">톤 키워드</Label>
+                  <Input value={toneKeywords} onChange={e => setToneKeywords(e.target.value)} placeholder="예: dreamy, soft, warm" className="mt-1" />
+                </div>
+                <div className="flex gap-2 pt-2">
+                  <Button onClick={handleSaveConfig} variant="outline" disabled={loading}>저장</Button>
+                  <Button onClick={handleGenerateAnchors} disabled={!config?.base_image_path || loading || !geminiConfigured}>
+                    {loading ? 'Anchor 생성 중...' : '🔗 Anchor 4장 생성'}
+                  </Button>
+                </div>
+                {!geminiConfigured && (
+                  <p className="text-xs text-red-400">GEMINI_API_KEY가 설정되지 않았습니다. .env.local에 추가하세요.</p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Workflow Guide */}
+          {hasStoryChars && (
+            <Card className="border-dashed">
+              <CardContent className="p-4">
+                <h4 className="text-sm font-medium mb-2">전체 워크플로우</h4>
+                <div className="flex items-center gap-1 text-xs text-muted-foreground flex-wrap">
+                  {[
+                    { step: '1', label: '캐릭터 선택', done: !!activeCharacterId },
+                    { step: '2', label: 'MJ 프롬프트 복사', done: !!activeVisualPrompt?.mj_base_prompt },
+                    { step: '3', label: 'MJ에서 이미지 생성', done: false },
+                    { step: '4', label: '이미지 업로드', done: !!config?.base_image_path },
+                    { step: '5', label: 'Anchor 4장', done: anchors.filter(a => a.status === 'completed').length === 4 },
+                    { step: '6', label: '40 Shot 생성', done: stats.completed > 0 },
+                  ].map((s, i) => (
+                    <span key={s.step} className="flex items-center gap-1">
+                      {i > 0 && <span className="text-muted-foreground/40 mx-1">→</span>}
+                      <span className={cn(
+                        'inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px]',
+                        s.done ? 'border-green-500/40 text-green-400 bg-green-500/10' : 'border-border',
+                      )}>
+                        {s.done ? '✓' : s.step}. {s.label}
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
       )}
 
@@ -384,7 +534,6 @@ export default function CharacterizerPage() {
             </CardContent>
           </Card>
 
-          {/* Preview grid of kept/maybe shots */}
           {(() => {
             const previewShots = shots.filter(s => s.status === 'completed' && s.file_path && s.selection_state !== 'reject');
             if (previewShots.length === 0) return null;

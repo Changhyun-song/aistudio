@@ -70,7 +70,7 @@ ${projectContext.slice(0, 4000)}
 반드시 유효한 JSON만 출력. 다른 텍스트 없이.`;
 
   const provider = getProvider();
-  const raw = await provider.chat(getPlannerPrompt(taskType), userMsg, { maxTokens: 2000, temperature: 0, model: MODEL_PLANNER });
+  const raw = await provider.chat(getPlannerPrompt(taskType), userMsg, { maxTokens: 2000, temperature: 0, model: MODEL_PLANNER, trackingContext: { projectId: '', stage: `plan_init_${taskType}`, role: 'planner' } });
   try {
     return JSON.parse(extractJsonBlock(raw));
   } catch {
@@ -131,7 +131,7 @@ ${prevBlock}
 반드시 유효한 JSON만 출력. 다른 텍스트 없이.`;
 
   const provider = getProvider();
-  const raw = await provider.chat(getPlannerPrompt(taskType), userMsg, { maxTokens: 4000, temperature: 0, model: MODEL_PLANNER });
+  const raw = await provider.chat(getPlannerPrompt(taskType), userMsg, { maxTokens: 4000, temperature: 0, model: MODEL_PLANNER, trackingContext: { projectId: '', stage: `plan_interpret_${taskType}`, role: 'planner' } });
   try {
     return JSON.parse(extractJsonBlock(raw));
   } catch {

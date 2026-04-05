@@ -117,21 +117,22 @@ Success contract는 프로젝트별 입력에 따라 달라질 수 있다.
 # A. Story Architect 단계
 
 Planner는 아래를 본다.
-- 독창성
-- 캐릭터 구분도
-- 조연 존재감
-- 세계관 훅
-- 감정선
-- 내부 일관성
-- 시즌 확장성
+- 보고 싶은가 (watchability)
+- 캐릭터를 좋아하게 되는가 (character_likability)
+- 관계가 이야기를 끄는가 (relationship_driven)
+- 자연스러운가 (naturalness)
+- 소재가 관계를 아프게 만드는가 (premise_in_relationship)
+- 일상과 위기의 균형 (everyday_crisis_balance)
+- 내부 일관성 (internal_consistency)
 
 다음과 같은 상황이면 Story Architect 단계에서 잡아야 한다.
-- 핵심 갈등이 약함
-- 세계관 규칙이 익숙하고 훅이 없음
-- 캐릭터가 구분되지 않음
-- 이름/성별/사건이 충돌
-- 조연이 집합명사 수준
-- 로그라인/premise/theme/goal이 중복
+- 보고 싶지 않은 이야기 (watchability ≤ 3)
+- 설정이 관계를 지배 (relationship_driven ≤ 2)
+- 일상 장면이 없어서 캐릭터를 좋아할 수 없음
+- 소재와 관계가 분리되어 있음
+- 우연/편의적 전환이 사용됨
+- 세계관 규칙이 불필요하게 많음 (미니시리즈에 2개 이상)
+- 이름/성별/사건 충돌
 
 결정 예:
 - `revise_full`: 콘셉트 자체가 약함

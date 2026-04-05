@@ -193,7 +193,7 @@ ${charBlock ? `## 사용자 지정 등장인물\n${charBlock}` : ''}
 
   const provider = getProvider();
   const supplement = projectId ? getSupplementForStage(projectId, 'ai1') : '';
-  return provider.chat(getStoryArchitectPrompt(supplement), userMsg, { maxTokens: 16000, temperature: 0.8, model: MODEL_AI1_CONCEPT });
+  return provider.chat(getStoryArchitectPrompt(supplement), userMsg, { maxTokens: 16000, temperature: 0.8, model: MODEL_AI1_CONCEPT, trackingContext: { projectId: projectId || '', stage: 'ai1_concept', role: 'generator' } });
 }
 
 export async function reviseStoryConcept(
@@ -218,7 +218,7 @@ ${overlayBlock}
 
   const provider = getProvider();
   const supplement = projectId ? getSupplementForStage(projectId, 'ai1') : '';
-  return provider.chat(getStoryArchitectPrompt(supplement), userMsg, { maxTokens: 16000, temperature: 0.8, model: MODEL_AI1_CONCEPT });
+  return provider.chat(getStoryArchitectPrompt(supplement), userMsg, { maxTokens: 16000, temperature: 0.8, model: MODEL_AI1_CONCEPT, trackingContext: { projectId: projectId || '', stage: 'ai1_revise', role: 'generator' } });
 }
 
 // ══════════════════════════════════════════════════════
@@ -445,7 +445,7 @@ ${input.referenceMood}
 
   const provider = getProvider();
   const supplement = projectId ? getSupplementForStage(projectId, 'ai2') : '';
-  const raw = await provider.chat(getScreenplayDirectorPrompt(supplement), userMsg, { maxTokens: 8000, temperature: 0.7, model: MODEL_AI2_BIBLE });
+  const raw = await provider.chat(getScreenplayDirectorPrompt(supplement), userMsg, { maxTokens: 8000, temperature: 0.7, model: MODEL_AI2_BIBLE, trackingContext: { projectId: projectId || '', stage: 'ai2_bible', role: 'generator' } });
   try {
     return JSON.parse(extractJsonBlock(raw));
   } catch {
@@ -565,7 +565,7 @@ ${epCount}개의 에피소드를 출력. 한국어로 작성.`;
   const sysPrompt = getScreenplayDirectorPrompt(projectId ? getSupplementForStage(projectId, 'ai2') : '');
 
   for (let retry = 0; retry < 3; retry++) {
-    const raw = await provider.chat(sysPrompt, userMsg, { maxTokens: 16000, model: MODEL_AI2_SEASON });
+    const raw = await provider.chat(sysPrompt, userMsg, { maxTokens: 16000, model: MODEL_AI2_SEASON, trackingContext: { projectId: projectId || '', stage: 'ai2_season', role: 'generator' } });
     try {
       const parsed = JSON.parse(extractJsonBlock(raw));
       const episodes = Array.isArray(parsed) ? parsed : [];
@@ -717,7 +717,7 @@ ${revisionFeedback ? `## ★ 이전 평가 피드백 (반드시 반영할 것)\n
   const sysPrompt = getScreenplayDirectorPrompt(projectId ? getSupplementForStage(projectId, 'ai2') : '');
 
   for (let retry = 0; retry < 3; retry++) {
-    const raw = await provider.chat(sysPrompt, userMsg, { maxTokens: 16000, model: MODEL_AI2_SCRIPT });
+    const raw = await provider.chat(sysPrompt, userMsg, { maxTokens: 16000, model: MODEL_AI2_SCRIPT, trackingContext: { projectId: projectId || '', stage: 'ai2_script', role: 'generator' } });
     try {
       return JSON.parse(extractJsonBlock(raw));
     } catch {
@@ -1128,7 +1128,7 @@ export async function generateFrameAndVideoPackets(
     let parsed: any = null;
     for (let retry = 0; retry < 3; retry++) {
       try {
-        const raw = await provider.chat(sysPrompt, sceneMsg, { maxTokens: 8000, model: MODEL_AI3_CLIPS });
+        const raw = await provider.chat(sysPrompt, sceneMsg, { maxTokens: 8000, model: MODEL_AI3_CLIPS, trackingContext: { projectId: projectId || '', stage: 'ai3_clips', role: 'generator' } });
         parsed = JSON.parse(extractJsonBlock(raw));
         break;
       } catch (err) {

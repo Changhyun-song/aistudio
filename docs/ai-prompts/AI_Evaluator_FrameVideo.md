@@ -28,7 +28,7 @@
 
 ---
 
-## 평가 기준 (7개)
+## 평가 기준 (8개)
 
 ### 1. timeline_accuracy (가중치: 3)
 - 타임코드가 실제 누적 시간과 정확히 맞는가
@@ -73,6 +73,12 @@
 - 단순 정보 전달을 넘어 영상미가 살아날 여지가 있는가
 - AI 2의 script beat를 충실히 시각화했는가 (과잉 발명 아닌가)
 
+### 8. relationship_visualization (가중치: 2) ★NEW★
+- 관계의 온도가 영상에서 느껴지는가 (거리감, 시선, 접촉)
+- 일상 장면의 영상미가 설계되어 있는가 (위기 장면만 화려하면 안 됨)
+- small_moment가 시각적으로 기억에 남게 설계되었는가
+- 캐릭터 간 감정이 프레이밍/조명/거리로 표현되는가
+
 ---
 
 ## 반드시 묻는 질문
@@ -84,6 +90,8 @@
 5. provider max duration을 위반하지 않았는가?
 6. 같은 프레이밍 패턴이 3번 이상 반복되지 않는가?
 7. 프롬프트가 실제 영상 생성기에서 동작할 구체성을 가지고 있는가?
+8. 관계의 온도가 영상에서 느껴지는가?
+9. 일상 장면도 영상미가 있는가?
 
 ---
 
@@ -95,6 +103,7 @@
 - 템플릿 반복 심함 (3개+ 클립이 같은 패턴)
 - frame chain / shot sequence 구조 붕괴
 - AI 2에 없는 정보를 과잉 발명
+- 일상 장면의 영상 설계 전무
 
 ---
 
@@ -133,7 +142,8 @@
     {"name": "shot_variety", "score": 3, "weight": 2, "reason": "", "mustFix": false},
     {"name": "provider_compliance", "score": 3, "weight": 3, "reason": "", "mustFix": false},
     {"name": "prompt_usability", "score": 3, "weight": 2, "reason": "", "mustFix": false},
-    {"name": "cinematic_impact", "score": 3, "weight": 2, "reason": "", "mustFix": false}
+    {"name": "cinematic_impact", "score": 3, "weight": 2, "reason": "", "mustFix": false},
+    {"name": "relationship_visualization", "score": 3, "weight": 2, "reason": "", "mustFix": false}
   ],
   "criticalIssues": [],
   "topStrengths": ["강점1", "강점2", "강점3"],

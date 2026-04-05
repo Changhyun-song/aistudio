@@ -30,84 +30,97 @@
 
 ## 평가 기준 (7개)
 
-### 1. originality (가중치: 2)
-- 이 작품만의 고유 장치가 있는가
-- 익숙한 조합을 그대로 반복하는가
-- "한 줄로 설명했을 때 기억에 남는" 훅이 있는가
-- 클리셰를 비틀거나 전복하는가
+### 1. watchability (가중치: 3) ★ 3점 이하면 무조건 불합격 ★
+- 시놉시스만 읽어도 1화를 켜고 싶은가
+- "이 다음에 뭐가 되는데?"가 멈추지 않는가
+- 설정은 신기한데 보고 싶진 않다면 → 3점
+- "예측 가능"이라는 평가를 쓰면서 4점 이상을 주면 → 모순. 즉시 3점 이하로.
 
-### 2. character_distinction (가중치: 2)
-- 메인 캐릭터가 이름만 다른 게 아니라 실질적으로 구분되는가
-- 말투/욕망/약점/비밀/시그니처가 겹치지 않는가
-- 각 캐릭터만의 "이 캐릭터를 빼면 이야기가 성립 안 되는" 기능이 있는가
+### 2. character_likability (가중치: 2)
+- EP1 일상만으로 이 사람이 좋은가. 위기가 오면 진심으로 걱정되는가.
+- 사건의 도구처럼 느껴지면 → 3점
+- 이름을 바꿔도 같은 이야기면 → 2점
+- 일상 장면 없이 위기만 나열하면 → 캐릭터 매력 검증 불가 → 최대 3점
 
-### 3. worldbuilding_hook (가중치: 2)
-- 세계관 규칙이 한 줄 훅으로 설명 가능한가
-- "물리적 장소 + 추상적 요소"의 비정상적 연결이 있는가
-- 왜 이 세계/이 규칙이어야 하는지 설득력 있는가
-- 단순 배경이 아니라 사건의 원인이 되는가
+### 3. relationship_driven (가중치: 3)
+- 이야기의 엔진이 "설정"이 아니라 "두 사람 사이의 필요"인가
+- 두 사람 대화만으로 장면이 성립하는가
+- 소재가 관계를 압박하는 장치로 작동하는가
+- 세계관 규칙이 관계보다 눈에 띄면 → 3점
+- 캐릭터가 설정 전달 도구이면 → 2점
 
-### 4. conflict_engine (가중치: 2)
-- 외부 갈등(사건/위협)과 내부 갈등(관계/감정)이 둘 다 살아있는가
-- 갈등이 단순 설명이 아니라 이야기를 앞으로 밀어내는 엔진인가
-- 팀물이면 팀 내부 충돌이 실제로 기능하는가
+### 4. naturalness (가중치: 2)
+- 우연 없이 캐릭터 선택에서 모든 사건이 나오는가
+- "마침, 때마침, 우연히, 갑자기" 편의적 전환이 있으면 감점
+- 감동을 위해 역순 설계한 느낌이 있으면 → 3점 이하
+- "이 사람이 이 상황에서 정말 이렇게 할까?" 통과하는가
 
-### 5. emotional_hook (가중치: 2)
-- 1화/시즌 전체를 보고 싶게 만드는 감정 동력이 있는가
-- 상실/질투/사랑/비밀/분노/재결속이 설정 소개를 넘어 실제로 작동하는가
-- 캐릭터에 감정이입이 되는가
+### 5. premise_in_relationship (가중치: 2)
+- 소재를 빼면 이 관계의 아픔이 성립 안 하는가
+- 소재와 관계가 불가분이면 → 5점
+- 소재가 배경일 뿐이면 → 3점
+- 소재와 관계가 분리되어 있으면 → 2점
 
-### 6. internal_consistency (가중치: 3)
+### 6. everyday_crisis_balance (가중치: 2)
+- EP1에 일상이 70% 이상 있는가
+- small_moment(결말에서 다시 떠오를 사소한 장면)가 있는가
+- 처음부터 끝까지 위기만이면 → 2점
+- 일상이 있어서 위기가 더 아프면 → 5점
+
+### 7. internal_consistency (가중치: 2)
 - 이름/성별/인원수/관계/사건이 충돌하지 않는가
-- 능력/규칙/사건의 인과가 논리적인가
-- protagonist_count, cast_total_limit 등 프로젝트 제약을 지켰는가
+- 프로젝트 제약을 지켰는가
+- AI 2가 대본화하기 충분한 재료가 있는가
 
-### 7. expansion_readiness (가중치: 2)
-- AI 2가 10부작 대본화하기 충분한 재료가 있는가
-- 시즌 목표/핵심 갈등/캐릭터 아크가 명확한가
-- 각 화의 narrative engine 후보가 보이는가
-- 조연의 시즌 내 기능이 설계되어 있는가
+## 감점 규칙
+- 같은 beat 패턴 반복: -1
+- 우연 2번 이상: naturalness 자동 3점 캡
+- 세계관 규칙 2개 이상(미니시리즈 기준): -1
+- "예측 가능" 사용 시: watchability 4점 이상 불가
+- 조직 음모/시스템 통제가 주 갈등: -2
 
 ---
 
 ## 반드시 묻는 질문
 
-1. 설정은 괜찮은데 이야기가 평범하지 않은가?
-2. 캐릭터가 라벨만 있고 진짜 살아 있지 않은가?
-3. 로그라인/premise/theme/goal이 같은 말을 반복하고 있지 않은가?
-4. 조연이 카드만 있고 시즌에서 실제로 영향력이 없는가?
-5. 세계관 훅이 "특별한 장소가 있다" 수준에서 멈춰 있지 않은가?
-6. AI 2 대본화에 필요한 밀도가 충분한가?
-7. 제목이 generic하지 않은가?
+1. 설정이 아니라 관계가 이야기를 끌고 있는가?
+2. EP1에 캐릭터를 좋아할 수 있는 일상이 충분한가?
+3. 소재를 빼면 이 관계의 아픔이 사라지는가?
+4. "마침/우연히" 같은 편의적 전환이 있는가?
+5. 캐릭터가 플롯에 끌려다니지 않고 자기 선택으로 사건을 만드는가?
+6. 시놉시스만 읽어도 1화를 켜고 싶은가?
+7. AI 2 대본화에 필요한 밀도가 충분한가?
 
 ---
 
 ## must-fix 조건
-- 메인 캐릭터 구분 실패
-- 세계관 규칙이 흔하고 모호
-- 핵심 갈등 약함
-- 로그라인/premise/theme/goal 중복
+- watchability 3점 이하 (보고 싶지 않은 이야기)
+- 설정이 관계를 지배 (relationship_driven ≤ 2)
+- 일상 장면 전무 (everyday_crisis_balance ≤ 2)
+- 우연/편의적 전환 2회 이상
+- 캐릭터가 설정 전달 도구
 - 이름/인원수/성별 충돌
-- 조연이 집합명사 수준
-- protagonist_count 미준수
 
 ---
 
 ## 채점 보정 예시 (Calibration)
 
 ### 예시 A: overallScore 2.5 판정
-- originality 2: "특별한 학교에서 괴물이 나타남" → 10개 이상의 기존 작품과 동일
-- character_distinction 3: 5명의 메인이 있지만 "리더/참모/전투형/힐러/신비" 범용 역할
-- worldbuilding_hook 2: "학교 지하에 봉인된 문이 있다" → 게이트 구조, 고유성 없음
-- conflict_engine 3: "괴물 vs 학생" 외부 갈등만. 내부 갈등 약함
-→ 이 수준은 AI 2로 넘기면 대본이 generic해짐. revise 필수.
+- watchability 2: "특별한 학교에서 괴물이 나타남" → 설정은 있지만 1화를 켜고 싶지 않음
+- character_likability 2: 5명이 있지만 일상 장면 없이 위기만 나열 → 누구에게도 감정이입 불가
+- relationship_driven 2: 관계가 아니라 "괴물 vs 학생" 설정이 이야기를 지배. 캐릭터가 설정 전달 도구
+- naturalness 3: 괴물 출현 타이밍이 "마침" 시험 기간에 → 편의적 전환
+- everyday_crisis_balance 1: EP1부터 위기만. 일상 장면 전무
+→ 관계가 없고 설정만 있는 이야기. watchability 불합격. revise 필수.
 
 ### 예시 B: overallScore 4.3 판정
-- originality 4: "잊혀진 감정이 시간으로 응축되는 시계탑" → 고유 장치, 기존 작품과 차별화
-- character_distinction 5: 각 캐릭터의 서사 기능/약점/시즌 역할이 모두 다름
-- worldbuilding_hook 4: 추상+물리 연결 있지만 "왜 이 학교인가"의 답이 약간 약함
-- conflict_engine 4: 내부(판단 갈등) + 외부(시간 붕괴) 둘 다 기능하지만 중반 확장이 더 필요
-→ 세부 보완 후 AI 2로 넘기기 적합. approve 가능.
+- watchability 5: "잊혀진 감정이 시간으로 응축되는 시계탑" → 두 사람의 과거가 궁금해서 1화를 켤 수밖에 없음
+- character_likability 4: EP1 일상에서 주인공의 사소한 습관이 매력적. 위기 때 진심으로 걱정됨
+- relationship_driven 5: 시계탑의 규칙이 두 사람의 관계를 압박하는 장치로 완벽히 작동
+- naturalness 4: 캐릭터 선택에서 사건이 나오지만, 중반 한 장면에서 우연이 개입
+- premise_in_relationship 5: 시계탑(소재)을 빼면 이 관계의 아픔이 성립 안 함 → 불가분
+- everyday_crisis_balance 4: EP1 일상 70% 확보, small_moment 있지만 한 장면 더 있으면 완벽
+→ 관계 중심 서사가 탄탄. 세부 보완 후 approve 가능.
 
 ---
 
@@ -122,13 +135,13 @@
   "weightedScore": 3.2,
   "pass": false,
   "criteria": [
-    {"name": "originality", "score": 3, "weight": 2, "reason": "구체적 근거", "mustFix": false},
-    {"name": "character_distinction", "score": 3, "weight": 2, "reason": "", "mustFix": false},
-    {"name": "worldbuilding_hook", "score": 3, "weight": 2, "reason": "", "mustFix": false},
-    {"name": "conflict_engine", "score": 3, "weight": 2, "reason": "", "mustFix": false},
-    {"name": "emotional_hook", "score": 3, "weight": 2, "reason": "", "mustFix": false},
-    {"name": "internal_consistency", "score": 3, "weight": 3, "reason": "", "mustFix": false},
-    {"name": "expansion_readiness", "score": 3, "weight": 2, "reason": "", "mustFix": false}
+    {"name": "watchability", "score": 3, "weight": 3, "reason": "", "mustFix": false},
+    {"name": "character_likability", "score": 3, "weight": 2, "reason": "", "mustFix": false},
+    {"name": "relationship_driven", "score": 3, "weight": 3, "reason": "", "mustFix": false},
+    {"name": "naturalness", "score": 3, "weight": 2, "reason": "", "mustFix": false},
+    {"name": "premise_in_relationship", "score": 3, "weight": 2, "reason": "", "mustFix": false},
+    {"name": "everyday_crisis_balance", "score": 3, "weight": 2, "reason": "", "mustFix": false},
+    {"name": "internal_consistency", "score": 3, "weight": 2, "reason": "", "mustFix": false}
   ],
   "criticalIssues": [],
   "topStrengths": ["강점1", "강점2", "강점3"],

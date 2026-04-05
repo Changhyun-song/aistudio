@@ -755,6 +755,8 @@ export const promptSupplementRepo = {
 
 // ── Prompt Supplement Rules ────────────────────────────
 
+export type RuleScope = 'project' | 'global';
+
 export interface PromptSupplementRule {
   id: string;
   project_id: string;
@@ -762,41 +764,115 @@ export interface PromptSupplementRule {
   rule_text: string;
   source: string;
   status: string;
+  scope: RuleScope;
+  genre_tags: string;
+  is_content_agnostic: number;
   score_before: number | null;
   score_after: number | null;
   effectiveness: number | null;
+  global_effectiveness: number | null;
   apply_count: number;
   success_count: number;
+  global_apply_count: number;
+  global_success_count: number;
+  origin_project_id: string | null;
+  promoted_at: string | null;
   created_at: string;
   updated_at: string;
 }
 
 export const promptSupplementRuleRepo = {
+  // ── Query ──────────────────────────────────────────
+
   listByStage(projectId: string, stage: string): PromptSupplementRule[] {
     return getDb().prepare(
       'SELECT * FROM prompt_supplement_rules WHERE project_id = ? AND stage = ? ORDER BY created_at DESC'
     ).all(projectId, stage) as PromptSupplementRule[];
   },
+
   listActive(projectId: string, stage: string): PromptSupplementRule[] {
     return getDb().prepare(
       `SELECT * FROM prompt_supplement_rules WHERE project_id = ? AND stage = ? AND status = 'active' ORDER BY effectiveness DESC NULLS LAST`
     ).all(projectId, stage) as PromptSupplementRule[];
   },
+
+  listGlobalActive(stage: string): PromptSupplementRule[] {
+    return getDb().prepare(
+      `SELECT * FROM prompt_supplement_rules WHERE scope = 'global' AND stage = ? AND status = 'active' ORDER BY global_effectiveness DESC NULLS LAST`
+    ).all(stage) as PromptSupplementRule[];
+  },
+
+  listGlobalAll(stage?: string): PromptSupplementRule[] {
+    if (stage) {
+      return getDb().prepare(
+        `SELECT * FROM prompt_supplement_rules WHERE scope = 'global' AND stage = ? ORDER BY global_effectiveness DESC NULLS LAST`
+      ).all(stage) as PromptSupplementRule[];
+    }
+    return getDb().prepare(
+      `SELECT * FROM prompt_supplement_rules WHERE scope = 'global' ORDER BY stage, global_effectiveness DESC NULLS LAST`
+    ).all() as PromptSupplementRule[];
+  },
+
+  getEffectiveRules(projectId: string, stage: string): PromptSupplementRule[] {
+    return getDb().prepare(
+      `SELECT * FROM prompt_supplement_rules
+       WHERE stage = ? AND status = 'active'
+         AND (scope = 'global' OR project_id = ?)
+       ORDER BY scope ASC, effectiveness DESC NULLS LAST`
+    ).all(stage, projectId) as PromptSupplementRule[];
+  },
+
+  getEffectiveRuleText(projectId: string, stage: string): string {
+    const rules = this.getEffectiveRules(projectId, stage);
+    if (rules.length === 0) return '';
+    const globalRules = rules.filter(r => r.scope === 'global');
+    const localRules = rules.filter(r => r.scope === 'project');
+    const parts: string[] = [];
+    if (globalRules.length > 0) {
+      parts.push(`[글로벌 학습 규칙 (${globalRules.length}개)]\n` + globalRules.map((r, i) => `G${i + 1}. ${r.rule_text}`).join('\n'));
+    }
+    if (localRules.length > 0) {
+      parts.push(`[프로젝트 특화 규칙 (${localRules.length}개)]\n` + localRules.map((r, i) => `L${i + 1}. ${r.rule_text}`).join('\n'));
+    }
+    return parts.join('\n\n');
+  },
+
+  listByGenreTags(stage: string, tags: string[]): PromptSupplementRule[] {
+    if (tags.length === 0) return [];
+    const conditions = tags.map(() => `genre_tags LIKE ?`).join(' OR ');
+    const params = tags.map(t => `%"${t}"%`);
+    return getDb().prepare(
+      `SELECT * FROM prompt_supplement_rules WHERE stage = ? AND scope = 'project' AND status = 'active' AND (${conditions}) ORDER BY effectiveness DESC NULLS LAST`
+    ).all(stage, ...params) as PromptSupplementRule[];
+  },
+
+  // ── Create ─────────────────────────────────────────
+
   create(entry: {
     projectId: string;
     stage: string;
     ruleText: string;
     source?: string;
     scoreBefore?: number;
+    scope?: RuleScope;
+    genreTags?: string[];
+    isContentAgnostic?: boolean;
   }): PromptSupplementRule {
     const id = nanoid(12);
     const ts = now();
+    const scope = entry.scope || 'project';
+    const genreTags = JSON.stringify(entry.genreTags || []);
+    const isCA = entry.isContentAgnostic ? 1 : 0;
     getDb().prepare(
-      `INSERT INTO prompt_supplement_rules (id, project_id, stage, rule_text, source, status, score_before, apply_count, success_count, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 'candidate', ?, 0, 0, ?, ?)`
-    ).run(id, entry.projectId, entry.stage, entry.ruleText, entry.source || 'optimizer', entry.scoreBefore ?? null, ts, ts);
+      `INSERT INTO prompt_supplement_rules
+       (id, project_id, stage, rule_text, source, status, scope, genre_tags, is_content_agnostic, score_before, apply_count, success_count, global_apply_count, global_success_count, origin_project_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'candidate', ?, ?, ?, ?, 0, 0, 0, 0, ?, ?, ?)`
+    ).run(id, entry.projectId, entry.stage, entry.ruleText, entry.source || 'optimizer', scope, genreTags, isCA, entry.scoreBefore ?? null, entry.projectId, ts, ts);
     return getDb().prepare('SELECT * FROM prompt_supplement_rules WHERE id = ?').get(id) as PromptSupplementRule;
   },
+
+  // ── Record Application (project-level) ─────────────
+
   recordApplication(id: string, scoreAfter: number): void {
     const rule = getDb().prepare('SELECT * FROM prompt_supplement_rules WHERE id = ?').get(id) as PromptSupplementRule | undefined;
     if (!rule) return;
@@ -812,11 +888,81 @@ export const promptSupplementRuleRepo = {
       `UPDATE prompt_supplement_rules SET score_after = ?, apply_count = ?, success_count = ?, effectiveness = ?, status = ?, updated_at = ? WHERE id = ?`
     ).run(scoreAfter, newApplyCount, newSuccessCount, effectiveness, newStatus, now(), id);
   },
+
+  // ── Record Application (global-level tracking) ─────
+
+  recordGlobalApplication(id: string, improved: boolean): void {
+    const rule = getDb().prepare('SELECT * FROM prompt_supplement_rules WHERE id = ?').get(id) as PromptSupplementRule | undefined;
+    if (!rule || rule.scope !== 'global') return;
+    const newGAC = (rule.global_apply_count || 0) + 1;
+    const newGSC = improved ? (rule.global_success_count || 0) + 1 : (rule.global_success_count || 0);
+    const gEff = newGAC > 0 ? newGSC / newGAC : null;
+    const shouldRetire = newGAC >= 5 && (gEff ?? 0) < 0.3;
+    getDb().prepare(
+      `UPDATE prompt_supplement_rules SET global_apply_count = ?, global_success_count = ?, global_effectiveness = ?, status = ?, updated_at = ? WHERE id = ?`
+    ).run(newGAC, newGSC, gEff, shouldRetire ? 'retired' : rule.status, now(), id);
+  },
+
+  // ── Promote to Global ──────────────────────────────
+
+  promoteToGlobal(id: string): void {
+    const rule = getDb().prepare('SELECT * FROM prompt_supplement_rules WHERE id = ?').get(id) as PromptSupplementRule | undefined;
+    if (!rule) return;
+    const existing = getDb().prepare(
+      `SELECT id FROM prompt_supplement_rules WHERE scope = 'global' AND stage = ? AND rule_text = ?`
+    ).get(rule.stage, rule.rule_text);
+    if (existing) return;
+
+    const newId = nanoid(12);
+    const ts = now();
+    getDb().prepare(
+      `INSERT INTO prompt_supplement_rules
+       (id, project_id, stage, rule_text, source, status, scope, genre_tags, is_content_agnostic, score_before, score_after, effectiveness, global_effectiveness, apply_count, success_count, global_apply_count, global_success_count, origin_project_id, promoted_at, created_at, updated_at)
+       VALUES (?, '__global__', ?, ?, ?, 'active', 'global', ?, 1, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?)`
+    ).run(
+      newId, rule.stage, rule.rule_text, rule.source, rule.genre_tags,
+      rule.score_before, rule.score_after, rule.effectiveness, rule.effectiveness,
+      rule.apply_count, rule.success_count,
+      rule.project_id, ts, ts, ts,
+    );
+  },
+
+  tryAutoPromote(stage: string): PromptSupplementRule[] {
+    const candidates = getDb().prepare(
+      `SELECT * FROM prompt_supplement_rules
+       WHERE scope = 'project' AND stage = ? AND status = 'active'
+         AND is_content_agnostic = 1
+         AND effectiveness >= 0.6
+         AND apply_count >= 2
+         AND score_after > score_before`
+    ).all(stage) as PromptSupplementRule[];
+
+    const promoted: PromptSupplementRule[] = [];
+    for (const rule of candidates) {
+      const alreadyGlobal = getDb().prepare(
+        `SELECT id FROM prompt_supplement_rules WHERE scope = 'global' AND stage = ? AND rule_text = ?`
+      ).get(rule.stage, rule.rule_text);
+      if (!alreadyGlobal) {
+        this.promoteToGlobal(rule.id);
+        promoted.push(rule);
+      }
+    }
+    return promoted;
+  },
+
+  // ── Lifecycle ──────────────────────────────────────
+
   retire(id: string): void {
     getDb().prepare(`UPDATE prompt_supplement_rules SET status = 'retired', updated_at = ? WHERE id = ?`).run(now(), id);
   },
+
   deleteByProject(projectId: string): void {
-    getDb().prepare('DELETE FROM prompt_supplement_rules WHERE project_id = ?').run(projectId);
+    getDb().prepare(`DELETE FROM prompt_supplement_rules WHERE project_id = ? AND scope = 'project'`).run(projectId);
+  },
+
+  countGlobalActive(): number {
+    const row = getDb().prepare(`SELECT COUNT(*) as cnt FROM prompt_supplement_rules WHERE scope = 'global' AND status = 'active'`).get() as { cnt: number };
+    return row.cnt;
   },
 };
 
@@ -840,6 +986,9 @@ export interface StoryWarehouseItem {
   inner_conflict: string;
   outer_obstacle: string;
   expected_episodes: string;
+  eval_clarity: number;
+  eval_narrative_flow: number;
+  eval_focus: number;
   eval_freshness: number;
   eval_conflict: number;
   eval_empathy: number;
@@ -865,8 +1014,8 @@ export const storyWarehouseRepo = {
     const id = nanoid(12);
     const ts = now();
     getDb().prepare(
-      `INSERT INTO story_warehouse (id, title, logline, genre, tone, hook, target_audience, tags, source, status, project_id, raw_json, seed_json, synopsis, inner_conflict, outer_obstacle, expected_episodes, eval_freshness, eval_conflict, eval_empathy, eval_visual, eval_expandability, eval_overall, eval_verdict, eval_summary, pick_count, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO story_warehouse (id, title, logline, genre, tone, hook, target_audience, tags, source, status, project_id, raw_json, seed_json, synopsis, inner_conflict, outer_obstacle, expected_episodes, eval_clarity, eval_narrative_flow, eval_focus, eval_freshness, eval_conflict, eval_empathy, eval_visual, eval_expandability, eval_overall, eval_verdict, eval_summary, pick_count, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       id, item.title ?? '', item.logline ?? '', item.genre ?? '', item.tone ?? '',
       item.hook ?? '', item.target_audience ?? '', item.tags ?? '[]',
@@ -874,6 +1023,7 @@ export const storyWarehouseRepo = {
       item.raw_json ?? '{}', item.seed_json ?? '{}',
       item.synopsis ?? '', item.inner_conflict ?? '', item.outer_obstacle ?? '',
       item.expected_episodes ?? '',
+      item.eval_clarity ?? 0, item.eval_narrative_flow ?? 0, item.eval_focus ?? 0,
       item.eval_freshness ?? 0, item.eval_conflict ?? 0, item.eval_empathy ?? 0,
       item.eval_visual ?? 0, item.eval_expandability ?? 0, item.eval_overall ?? 0,
       item.eval_verdict ?? '', item.eval_summary ?? '', item.pick_count ?? 0,
@@ -897,6 +1047,32 @@ export const storyWarehouseRepo = {
   },
   delete(id: string): void {
     getDb().prepare('DELETE FROM story_warehouse WHERE id = ?').run(id);
+  },
+  deleteMany(ids: string[]): number {
+    if (ids.length === 0) return 0;
+    const db = getDb();
+    const placeholders = ids.map(() => '?').join(',');
+    const result = db.prepare(`DELETE FROM story_warehouse WHERE id IN (${placeholders})`).run(...ids);
+    return result.changes;
+  },
+  deleteAll(): number {
+    const result = getDb().prepare('DELETE FROM story_warehouse').run();
+    return result.changes;
+  },
+  deleteBelowScore(threshold: number): number {
+    const result = getDb().prepare('DELETE FROM story_warehouse WHERE eval_overall > 0 AND eval_overall < ?').run(threshold);
+    return result.changes;
+  },
+  countByScoreRange(): { total: number; belowThresholds: Record<string, number> } {
+    const db = getDb();
+    const total = (db.prepare('SELECT COUNT(*) as cnt FROM story_warehouse').get() as { cnt: number }).cnt;
+    const thresholds = [3.0, 3.5, 4.0, 4.5];
+    const belowThresholds: Record<string, number> = {};
+    for (const t of thresholds) {
+      const row = db.prepare('SELECT COUNT(*) as cnt FROM story_warehouse WHERE eval_overall > 0 AND eval_overall < ?').get(t) as { cnt: number };
+      belowThresholds[t.toFixed(1)] = row.cnt;
+    }
+    return { total, belowThresholds };
   },
   search(query: string): StoryWarehouseItem[] {
     const like = `%${query}%`;
@@ -1035,7 +1211,7 @@ export const pipelineRunRepo = {
 
   listAllLatest(): PipelineRunSummary[] {
     return getDb().prepare(
-      `SELECT r.id, r.project_id, r.pipeline_type, r.status, r.current_stage, r.current_stage_label, r.progress_pct, r.started_at, r.updated_at
+      `SELECT r.id, r.project_id, r.pipeline_type, r.status, r.current_stage, r.current_stage_label, r.progress_pct, r.error_message, r.started_at, r.updated_at, r.completed_at
        FROM pipeline_runs r
        INNER JOIN (
          SELECT project_id, MAX(started_at) as max_started
@@ -1071,6 +1247,24 @@ export const pipelineRunRepo = {
     getDb().prepare(
       `UPDATE pipeline_runs SET summary_json = ?, updated_at = ? WHERE id = ?`
     ).run(JSON.stringify(summary), now(), id);
+  },
+
+  saveLogs(id: string, logs: unknown[]): void {
+    getDb().prepare(
+      `UPDATE pipeline_runs SET logs_json = ?, updated_at = ? WHERE id = ?`
+    ).run(JSON.stringify(logs), now(), id);
+  },
+
+  getLogs(id: string): unknown[] {
+    const run = getDb().prepare('SELECT logs_json FROM pipeline_runs WHERE id = ?').get(id) as { logs_json: string } | undefined;
+    if (!run) return [];
+    try { return JSON.parse(run.logs_json); } catch { return []; }
+  },
+
+  getLatestByProject(projectId: string): PipelineRun | undefined {
+    return getDb().prepare(
+      'SELECT * FROM pipeline_runs WHERE project_id = ? ORDER BY started_at DESC LIMIT 1'
+    ).get(projectId) as PipelineRun | undefined;
   },
 
   deleteByProject(projectId: string): void {
